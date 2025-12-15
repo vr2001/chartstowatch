@@ -6,7 +6,7 @@ from datetime import datetime as dt, timedelta
 import time as pytime
 
 plt.switch_backend("Agg")
-st.set_page_config(page_title="Market Dashboard", layout="wide")
+st.set_page_config(page_title="Charts to Watch", layout="wide")
 
 # ============================================================
 # PRESET RATIOS (GROUPED)
@@ -56,9 +56,6 @@ RATIO_GROUPS = {
     }
 }
 
-# ============================================================
-# DESCRIPTIONS + COMMENTARY
-# ============================================================
 RATIO_INFO = {
     "SPY / RSP – S&P 500 Cap vs Equal Weight": {
         "description": "Cap-weighted S&P 500 vs equal-weight; highlights breadth vs mega-cap concentration.",
@@ -188,7 +185,7 @@ RATIO_INFO = {
 }
 
 # ============================================================
-# DATE RANGE HELPERS
+# DATE RANGE
 # ============================================================
 def start_date_from_preset(preset: str) -> str:
     today = dt.today()
@@ -200,11 +197,10 @@ def start_date_from_preset(preset: str) -> str:
         return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
     if preset == "5Y":
         return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-    # "Max" — practical default (Yahoo-like). You can change this if you want.
-    return "2000-01-01"
+    return "2000-01-01"  # Max (practical)
 
 # ============================================================
-# DATA HELPERS
+# DATA
 # ============================================================
 @st.cache_data(ttl=60 * 30)
 def fetch_close_series(ticker_symbol: str, start_date_str: str) -> pd.Series:
@@ -215,7 +211,7 @@ def fetch_close_series(ticker_symbol: str, start_date_str: str) -> pd.Series:
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
     close = close.dropna()
-    close.name = ticker_symbol  # IMPORTANT: don't use .rename(string)
+    close.name = ticker_symbol
     return close
 
 def build_ratio_dataframe(sym_a: str, sym_b: str, start_date_str: str) -> pd.DataFrame:
@@ -233,14 +229,13 @@ def build_ratio_dataframe(sym_a: str, sym_b: str, start_date_str: str) -> pd.Dat
     ma50 = ratio.rolling(50).mean()
     ma200 = ratio.rolling(200).mean()
 
-    out = pd.DataFrame({
+    return pd.DataFrame({
         sym_a: df[sym_a],
         sym_b: df[sym_b],
         "ratio": ratio,
         "ma50": ma50,
         "ma200": ma200
     })
-    return out
 
 @st.cache_data(ttl=60 * 60)
 def fetch_ytd_close_prices(ticker_list, start_date_str, end_date_str) -> pd.DataFrame:
@@ -258,65 +253,63 @@ def fetch_ytd_close_prices(ticker_list, start_date_str, end_date_str) -> pd.Data
         close_df = raw[["Close"]].copy()
         close_df.columns = [ticker_list[0]]
 
-    close_df = close_df.dropna(axis=1, how="all")
-    return close_df
+    return close_df.dropna(axis=1, how="all")
 
 def fetch_company_names(ticker_list, sleep_seconds=0.35) -> dict:
-    name_map = {}
+    names = {}
     for t in ticker_list:
         try:
             info_obj = yf.Ticker(t).info
-            name_map[t] = info_obj.get("shortName", t)
+            names[t] = info_obj.get("shortName", t)
         except Exception:
-            name_map[t] = t
+            names[t] = t
         pytime.sleep(sleep_seconds)
-    return name_map
+    return names
 
 # ============================================================
-# PAGE HEADER
+# APP HEADER
 # ============================================================
-st.title("📊 Market Dashboard")
-st.caption("Preset ratios + custom ratio charts + a cheat sheet + YTD performance.")
+st.title("📊 Charts to Watch")
+st.caption("Two tools: (1) Ratio charts (two tickers) and (2) YTD performance (up to 10 tickers).")
 
 # ============================================================
-# SIDEBAR = “CONTROL PANEL”
+# NAVIGATION (THIS FIXES THE CONFUSION)
 # ============================================================
-st.sidebar.header("Controls")
-
-# Ratio selection
-st.sidebar.subheader("Preset Ratios")
-group_choice = st.sidebar.selectbox("Category", list(RATIO_GROUPS.keys()))
-label_choice = st.sidebar.radio("Ratio", list(RATIO_GROUPS[group_choice].keys()))
-preset_a, preset_b = RATIO_GROUPS[group_choice][label_choice]
-
-# Date preset
-st.sidebar.subheader("Date Range")
-date_preset = st.sidebar.radio("Preset", ["YTD", "1Y", "3Y", "5Y", "Max"], horizontal=True)
-start_date_ratio = start_date_from_preset(date_preset)
-
-# Custom ratio controls
-st.sidebar.subheader("Custom Ratio")
-use_custom = st.sidebar.checkbox("Use custom tickers", value=False)
-custom_a = st.sidebar.text_input("Custom ticker 1", value="SPY").upper().strip()
-custom_b = st.sidebar.text_input("Custom ticker 2", value="TLT").upper().strip()
-
-# Advanced
-st.sidebar.subheader("Advanced")
-with st.sidebar.expander("Chart Options", expanded=False):
-    show_ma = st.checkbox("Show moving averages", value=True)
-    log_scale = st.checkbox("Log scale (ratio axis)", value=False)
-    show_extremes = st.checkbox("Label high/low + latest", value=False)
+st.sidebar.header("Navigation")
+page = st.sidebar.radio(
+    "Go to",
+    ["📊 Ratio Dashboard", "📈 YTD Performance", "📋 Cheat Sheet"],
+    index=0
+)
 
 # ============================================================
-# TABS
+# PAGE 1: RATIO DASHBOARD
 # ============================================================
-tab_ratio, tab_cheat, tab_ytd = st.tabs(["📊 Ratio Chart", "📋 Cheat Sheet", "📈 YTD Performance"])
+if page == "📊 Ratio Dashboard":
+    st.subheader("📊 Ratio Dashboard")
+    st.info("This page charts a **ratio of two symbols** (Symbol A / Symbol B). Use preset ratios or enter your own.")
 
-# ============================================================
-# TAB 1: RATIO CHART (PRO UI + PRESET DATES)
-# ============================================================
-with tab_ratio:
-    # Choose symbols + text content
+    # Sidebar controls specific to Ratio Dashboard
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Ratio Controls")
+
+    group_choice = st.sidebar.selectbox("Category", list(RATIO_GROUPS.keys()))
+    label_choice = st.sidebar.radio("Preset ratios", list(RATIO_GROUPS[group_choice].keys()))
+    preset_a, preset_b = RATIO_GROUPS[group_choice][label_choice]
+
+    date_preset = st.sidebar.radio("Date range", ["YTD", "1Y", "3Y", "5Y", "Max"], horizontal=True)
+    start_date_ratio = start_date_from_preset(date_preset)
+
+    use_custom = st.sidebar.checkbox("Use custom tickers", value=False)
+    custom_a = st.sidebar.text_input("Custom ticker 1", value="SPY").upper().strip()
+    custom_b = st.sidebar.text_input("Custom ticker 2", value="TLT").upper().strip()
+
+    with st.sidebar.expander("Advanced chart options"):
+        show_ma = st.checkbox("Show moving averages", value=True)
+        log_scale = st.checkbox("Log scale", value=False)
+        show_extremes = st.checkbox("Label high/low/latest", value=False)
+
+    # Choose symbols + copy
     if use_custom:
         sym_a, sym_b = custom_a, custom_b
         title_text = f"Custom Ratio: {sym_a}/{sym_b}"
@@ -331,58 +324,43 @@ with tab_ratio:
         comm_text = info.get("commentary", "No commentary available.")
         csv_prefix = f"{sym_a}_{sym_b}_preset"
 
-    # Header + description
-    st.subheader(title_text)
+    st.markdown(f"### {title_text}")
     st.write(f"**Date Range:** {date_preset} (start: `{start_date_ratio}`)")
     st.markdown(f"**Description:** {desc_text}")
     st.markdown(f"**Commentary:** {comm_text}")
 
-    # Session state for downloads
     if "ratio_df" not in st.session_state:
         st.session_state["ratio_df"] = pd.DataFrame()
         st.session_state["ratio_name"] = ""
 
-    # Plot action
-    plot_col, _ = st.columns([1, 3])
-    with plot_col:
-        plot_clicked = st.button("Plot ratio", type="primary")
-
-    if plot_clicked:
+    if st.button("Plot ratio", type="primary"):
         try:
             with st.spinner("Downloading data..."):
                 df_ratio = build_ratio_dataframe(sym_a, sym_b, start_date_ratio)
-
             if df_ratio.empty:
-                st.error("No valid data returned. Check tickers (or choose Max) and try again.")
+                st.error("No valid data returned. Try Max or check tickers.")
             else:
                 st.session_state["ratio_df"] = df_ratio
                 st.session_state["ratio_name"] = f"{sym_a}/{sym_b}"
-
         except Exception as e:
             st.exception(e)
 
-    # If we have data, show “professional” dashboard layout
     df_saved = st.session_state.get("ratio_df", pd.DataFrame())
     if isinstance(df_saved, pd.DataFrame) and not df_saved.empty:
         r = df_saved["ratio"].dropna()
         latest_val = float(r.iloc[-1])
         prev_val = float(r.iloc[-2]) if len(r) > 1 else latest_val
         delta_pct = (latest_val / prev_val - 1) * 100 if prev_val != 0 else 0.0
-
-        high_val = float(r.max())
-        high_date = r.idxmax()
-        low_val = float(r.min())
-        low_date = r.idxmin()
+        high_val = float(r.max()); high_date = r.idxmax()
+        low_val = float(r.min()); low_date = r.idxmin()
         drawdown_pct = (latest_val / high_val - 1) * 100 if high_val != 0 else 0.0
 
-        # Metrics row
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Latest", f"{latest_val:.3f}", f"{delta_pct:+.2f}%")
         m2.metric("High", f"{high_val:.3f}", high_date.strftime("%Y-%m-%d"))
         m3.metric("Low", f"{low_val:.3f}", low_date.strftime("%Y-%m-%d"))
         m4.metric("Drawdown from High", f"{drawdown_pct:.2f}%", "")
 
-        # Chart
         fig, ax = plt.subplots(figsize=(11, 5))
         ax.plot(df_saved.index, df_saved["ratio"], label=f"{sym_a}/{sym_b} Ratio", linewidth=1.7)
 
@@ -393,25 +371,15 @@ with tab_ratio:
                 ax.plot(df_saved.index, df_saved["ma200"], label="200-day MA", linestyle="--", linewidth=1.2)
 
         if show_extremes:
-            # Markers
             ax.scatter([high_date], [high_val], s=45)
             ax.scatter([low_date], [low_val], s=45)
             ax.scatter([r.index[-1]], [latest_val], s=45)
-
-            # Labels
-            ax.annotate(f"High {high_val:.3f}",
-                        xy=(high_date, high_val),
-                        xytext=(10, 10), textcoords="offset points")
-            ax.annotate(f"Low {low_val:.3f}",
-                        xy=(low_date, low_val),
-                        xytext=(10, -15), textcoords="offset points")
-            ax.annotate(f"Latest {latest_val:.3f}",
-                        xy=(r.index[-1], latest_val),
-                        xytext=(10, 0), textcoords="offset points")
+            ax.annotate(f"High {high_val:.3f}", xy=(high_date, high_val), xytext=(10, 10), textcoords="offset points")
+            ax.annotate(f"Low {low_val:.3f}", xy=(low_date, low_val), xytext=(10, -15), textcoords="offset points")
+            ax.annotate(f"Latest {latest_val:.3f}", xy=(r.index[-1], latest_val), xytext=(10, 0), textcoords="offset points")
 
         ax.set_title(title_text, fontsize=13, fontweight="bold")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Ratio")
+        ax.set_xlabel("Date"); ax.set_ylabel("Ratio")
         if log_scale:
             ax.set_yscale("log")
         ax.grid(True, linestyle="--", alpha=0.35)
@@ -419,14 +387,9 @@ with tab_ratio:
         plt.tight_layout()
         st.pyplot(fig)
 
-        # Downloads
         df_export = df_saved.copy()
         ratio_lbl = st.session_state.get("ratio_name", "ratio")
-        df_export = df_export.rename(columns={
-            "ratio": f"{ratio_lbl}_ratio",
-            "ma50": "MA50",
-            "ma200": "MA200",
-        })
+        df_export = df_export.rename(columns={"ratio": f"{ratio_lbl}_ratio", "ma50": "MA50", "ma200": "MA200"})
         st.download_button(
             "📥 Download ratio series as CSV",
             data=df_export.to_csv().encode("utf-8"),
@@ -434,45 +397,16 @@ with tab_ratio:
             mime="text/csv"
         )
     else:
-        st.info("Click **Plot ratio** to generate the chart. Use the sidebar presets (YTD/1Y/3Y/5Y/Max) to change the time window.")
+        st.info("Tip: This page is for **two-ticker ratios**. Click **Plot ratio** to generate the chart.")
 
 # ============================================================
-# TAB 2: CHEAT SHEET
+# PAGE 2: YTD PERFORMANCE
 # ============================================================
-with tab_cheat:
-    st.subheader("📋 Ratio Cheat Sheet (All Presets)")
+elif page == "📈 YTD Performance":
+    st.subheader("📈 YTD Performance")
+    st.info("This page compares **up to 10 tickers** indexed to 100 on Jan 1 (YTD performance).")
 
-    rows = []
-    for cat, ratios in RATIO_GROUPS.items():
-        for lbl, (a, b) in ratios.items():
-            info = RATIO_INFO.get(lbl, {})
-            rows.append({
-                "Category": cat,
-                "Label": lbl,
-                "Symbol 1": a,
-                "Symbol 2": b,
-                "Description": info.get("description", ""),
-                "Commentary": info.get("commentary", "")
-            })
-
-    cheat_df = pd.DataFrame(rows)
-    st.dataframe(cheat_df, use_container_width=True)
-
-    st.download_button(
-        "📥 Download cheat sheet as CSV",
-        data=cheat_df.to_csv(index=False).encode("utf-8"),
-        file_name="ratio_cheat_sheet.csv",
-        mime="text/csv"
-    )
-
-# ============================================================
-# TAB 3: YTD PERFORMANCE (UNCHANGED)
-# ============================================================
-with tab_ytd:
-    st.subheader("📈 YTD Performance (% Change from Jan 1)")
-    st.write("Enter up to 10 tickers (comma-separated). Example: `SPY, QQQ, IWM, TLT`")
-
-    tickers_raw = st.text_input("Tickers", value="SPY, QQQ, IWM")
+    tickers_raw = st.text_input("Enter up to 10 tickers (comma-separated)", value="SPY, QQQ, IWM")
     ticker_list = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
 
     if len(ticker_list) > 10:
@@ -481,12 +415,12 @@ with tab_ytd:
 
     start_ytd = f"{dt.now().year}-01-01"
     end_ytd = dt.today().strftime("%Y-%m-%d")
-    want_names = st.checkbox("🔎 Fetch company names (slower; can hit rate limits)", value=False)
+    want_names = st.checkbox("🔎 Fetch company names (slower)", value=False)
 
     if "ytd_export" not in st.session_state:
         st.session_state["ytd_export"] = pd.DataFrame()
 
-    if st.button("Plot YTD Performance"):
+    if st.button("Plot YTD Performance", type="primary"):
         if len(ticker_list) == 0:
             st.error("❌ No tickers entered.")
         else:
@@ -524,7 +458,6 @@ with tab_ytd:
 
                 fig, ax = plt.subplots(figsize=(14, 9))
                 line_colors = {}
-
                 for t in ytd_idx.columns:
                     line, = ax.plot(ytd_idx.index, ytd_idx[t], linewidth=2)
                     line_colors[t] = line.get_color()
@@ -533,14 +466,12 @@ with tab_ytd:
 
                 sorted_tickers = final_vals.sort_values(ascending=False).index.tolist()
                 spacing_offset = 0.8
-
                 for rank, t in enumerate(sorted_tickers):
                     last_date = ytd_idx.index[-1]
                     last_value = ytd_idx[t].iloc[-1]
                     offset = spacing_offset * (len(sorted_tickers) - rank)
                     adjusted_y = last_value + offset
                     label_text = f"{t} ({last_value - 100:.1f}%)"
-
                     ax.text(
                         last_date, adjusted_y, label_text,
                         fontsize=9, ha="left", va="center",
@@ -582,4 +513,34 @@ with tab_ytd:
             mime="text/csv"
         )
     else:
-        st.info("Click **Plot YTD Performance** to generate the chart and enable CSV download.")
+        st.info("Tip: This page is for **multi-ticker YTD**. Click **Plot YTD Performance** to generate the chart.")
+
+# ============================================================
+# PAGE 3: CHEAT SHEET
+# ============================================================
+else:
+    st.subheader("📋 Cheat Sheet")
+    st.info("This page lists all preset ratios with descriptions and commentary (no chart).")
+
+    rows = []
+    for cat, ratios in RATIO_GROUPS.items():
+        for lbl, (a, b) in ratios.items():
+            info = RATIO_INFO.get(lbl, {})
+            rows.append({
+                "Category": cat,
+                "Label": lbl,
+                "Symbol 1": a,
+                "Symbol 2": b,
+                "Description": info.get("description", ""),
+                "Commentary": info.get("commentary", "")
+            })
+
+    cheat_df = pd.DataFrame(rows)
+    st.dataframe(cheat_df, use_container_width=True)
+
+    st.download_button(
+        "📥 Download cheat sheet as CSV",
+        data=cheat_df.to_csv(index=False).encode("utf-8"),
+        file_name="ratio_cheat_sheet.csv",
+        mime="text/csv"
+    )
