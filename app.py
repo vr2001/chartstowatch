@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime as dt, timedelta
 import time as pytime
+from typing import Optional, Dict
 
 plt.switch_backend("Agg")
 st.set_page_config(page_title="Charts to Watch", layout="wide")
@@ -56,9 +57,6 @@ RATIO_GROUPS = {
     }
 }
 
-# ============================================================
-# DESCRIPTIONS + COMMENTARY
-# ============================================================
 RATIO_INFO = {
     "SPY / RSP – S&P 500 Cap vs Equal Weight": {
         "description": "Cap-weighted S&P 500 vs equal-weight; highlights breadth vs mega-cap concentration.",
@@ -76,7 +74,6 @@ RATIO_INFO = {
         "description": "Mega-cap growth vs broad market; measures growth concentration.",
         "commentary": "Rising = growth crowding/concentration. Falling = rotation into broader market/value/cyclicals.",
     },
-
     "SPY / TLT – Stocks vs Long-Term Bonds": {
         "description": "Risk-on/risk-off: equities vs long-duration Treasuries.",
         "commentary": "Rising = risk-on. Falling = flight to safety / growth concerns / duration bid.",
@@ -97,7 +94,6 @@ RATIO_INFO = {
         "description": "High beta vs low vol; aggressive vs defensive indicator.",
         "commentary": "Rising = speculation/risk-taking. Falling = demand for stability/defense.",
     },
-
     "XLF / SPY – Financials vs Market": {
         "description": "Financials vs market; ties to credit and curve expectations.",
         "commentary": "Rising = improving conditions. Falling = tightening/stress or growth worries.",
@@ -122,7 +118,6 @@ RATIO_INFO = {
         "description": "Equal-weight discretionary vs equal-weight staples; reduces mega-cap distortion.",
         "commentary": "Rising = broad consumer risk-on. Falling = defensive consumer posture.",
     },
-
     "DBC / SPY – Commodities vs Stocks": {
         "description": "Broad commodities vs equities; inflation/real-asset sensitivity.",
         "commentary": "Rising = inflation/real asset bid. Falling = equity leadership/disinflation backdrop.",
@@ -155,7 +150,6 @@ RATIO_INFO = {
         "description": "Gold vs metals/mining; safety vs industrial cycle exposure.",
         "commentary": "Rising = defensive preference. Falling = pro-growth industrial demand theme.",
     },
-
     "EEM / SPY – Emerging Markets vs U.S.": {
         "description": "Emerging markets vs U.S.; global growth and USD sensitivity.",
         "commentary": "Rising = EM tailwinds (often weaker USD). Falling = U.S. dominance/caution.",
@@ -168,7 +162,6 @@ RATIO_INFO = {
         "description": "China vs U.S.; policy/growth and geopolitics sensitivity.",
         "commentary": "Rising = improving China sentiment. Falling = elevated risk/policy/growth concerns.",
     },
-
     "ETHA / IBIT – ETH vs BTC ETF": {
         "description": "Ethereum vs Bitcoin; crypto rotation gauge.",
         "commentary": "Rising = ETH leadership. Falling = BTC leadership as core asset bid.",
@@ -192,12 +185,10 @@ RATIO_INFO = {
 # ============================================================
 def period_start_date(preset: str) -> str:
     today = dt.today()
-
     if preset == "QTD":
         quarter = (today.month - 1) // 3 + 1
         start_month = 3 * (quarter - 1) + 1
         return dt(today.year, start_month, 1).strftime("%Y-%m-%d")
-
     if preset == "YTD":
         return f"{today.year}-01-01"
     if preset == "3M":
@@ -210,7 +201,7 @@ def period_start_date(preset: str) -> str:
         return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
     if preset == "5Y":
         return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-    return "2000-01-01"  # Max (practical)
+    return "2000-01-01"
 
 def ratio_start_date_from_preset(preset: str) -> str:
     today = dt.today()
@@ -227,23 +218,69 @@ def ratio_start_date_from_preset(preset: str) -> str:
 # ============================================================
 # SMALL HELPERS
 # ============================================================
-def pick_first_existing_col(df: pd.DataFrame, candidates: list[str]):
-    for c in candidates:
-        if df is not None and not df.empty and c in df.columns:
-            return c
-    return None
-
 def pct_growth(series: pd.Series) -> pd.Series:
     return series.pct_change() * 100
 
-def _fmt_percent(x):
+def fmt_percent(x) -> str:
     return f"{x:.2f}%" if pd.notna(x) else ""
 
-def _fmt_number(x):
+def fmt_number(x) -> str:
     return f"{x:,.2f}" if pd.notna(x) else ""
 
+def fmt_ratio(x) -> str:
+    return f"{x:.3f}" if pd.notna(x) else ""
+
+def safe_to_numeric(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
+def scaled_money(series: pd.Series, scale: str) -> pd.Series:
+    s = series.copy()
+    if scale == "Millions":
+        return s / 1_000_000
+    if scale == "Billions":
+        return s / 1_000_000_000
+    return s
+
+def find_line_item_row(df_raw: pd.DataFrame, candidates: list) -> Optional[str]:
+    """
+    Finds a line item in df_raw.index using flexible matching.
+    df_raw format: rows = line items, columns = dates
+    """
+    if df_raw is None or df_raw.empty:
+        return None
+
+    # Build a normalized map of index labels
+    idx = [str(x).strip() for x in df_raw.index]
+    idx_norm_map = {x.lower(): x for x in idx}
+
+    for c in candidates:
+        key = str(c).strip().lower()
+        if key in idx_norm_map:
+            return idx_norm_map[key]
+
+    # fallback: contains match
+    for c in candidates:
+        key = str(c).strip().lower()
+        for raw_label in idx:
+            if key in raw_label.lower():
+                return raw_label
+
+    return None
+
+def row_to_time_series(df_raw: pd.DataFrame, row_name: str) -> pd.Series:
+    """
+    df_raw row -> Series indexed by datetime (period end)
+    """
+    s = df_raw.loc[row_name].copy()
+    if isinstance(s, pd.DataFrame):
+        s = s.iloc[0]
+    s = safe_to_numeric(s)
+    s.index = pd.to_datetime(s.index, errors="coerce")
+    s = s.loc[s.index.notna()].sort_index()
+    return s.dropna()
+
 # ============================================================
-# DATA HELPERS
+# PRICE / PERFORMANCE DATA HELPERS
 # ============================================================
 @st.cache_data(ttl=60 * 30)
 def fetch_close_series(ticker_symbol: str, start_date_str: str) -> pd.Series:
@@ -303,39 +340,73 @@ def fetch_company_names(ticker_list, sleep_seconds=0.25) -> dict:
         pytime.sleep(sleep_seconds)
     return names
 
-@st.cache_data(ttl=60*60)
-def fetch_statements(ticker: str, frequency: str = "Annual") -> dict:
+# ============================================================
+# FUNDAMENTALS: RELIABLE STATEMENT GETTERS
+# ============================================================
+@st.cache_data(ttl=60 * 60)
+def fetch_statements_raw(ticker: str, frequency: str = "Annual") -> Dict[str, pd.DataFrame]:
+    """
+    Returns raw statements:
+      rows = line items, columns = period end dates (datetime)
+    Uses get_* methods first, then falls back.
+    """
     t = yf.Ticker(ticker)
+    freq = "yearly" if frequency == "Annual" else "quarterly"
 
-    if frequency == "Quarterly":
-        inc = t.quarterly_financials
-        bal = t.quarterly_balance_sheet
-        cfs = t.quarterly_cashflow
-    else:
-        inc = t.financials
-        bal = t.balance_sheet
-        cfs = t.cashflow
-
-    def _prep(df: pd.DataFrame) -> pd.DataFrame:
+    def _clean(df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame()
-        out = df.T.copy()
-        out.index = pd.to_datetime(out.index)
-        out = out.sort_index()
+        out = df.copy()
+        out.index = out.index.map(lambda x: str(x).strip())
+        out.columns = pd.to_datetime(out.columns, errors="coerce")
+        out = out.loc[:, out.columns.notna()].sort_index(axis=1)
         out = out.apply(pd.to_numeric, errors="coerce")
         return out
 
-    return {"income": _prep(inc), "balance": _prep(bal), "cash": _prep(cfs)}
+    # Prefer modern getter methods
+    income = pd.DataFrame()
+    balance = pd.DataFrame()
+    cash = pd.DataFrame()
 
-def compute_ratios_over_time(income_df: pd.DataFrame, balance_df: pd.DataFrame) -> pd.DataFrame:
-    if income_df is None or income_df.empty or balance_df is None or balance_df.empty:
+    try:
+        income = t.get_income_stmt(pretty=True, freq=freq)
+    except Exception:
+        pass
+    try:
+        balance = t.get_balance_sheet(pretty=True, freq=freq)
+    except Exception:
+        pass
+    try:
+        cash = t.get_cashflow(pretty=True, freq=freq)
+    except Exception:
+        pass
+
+    # Fallbacks
+    if income is None or income.empty:
+        income = t.financials if frequency == "Annual" else t.quarterly_financials
+    if balance is None or balance.empty:
+        balance = t.balance_sheet if frequency == "Annual" else t.quarterly_balance_sheet
+    if cash is None or cash.empty:
+        cash = t.cashflow if frequency == "Annual" else t.quarterly_cashflow
+
+    return {"income_raw": _clean(income), "balance_raw": _clean(balance), "cash_raw": _clean(cash)}
+
+def compute_ratios_over_time(income_t: pd.DataFrame, balance_t: pd.DataFrame) -> pd.DataFrame:
+    """
+    income_t, balance_t: transposed statements
+      rows = dates, cols = line items
+    """
+    if income_t is None or income_t.empty or balance_t is None or balance_t.empty:
         return pd.DataFrame()
 
-    df = income_df.join(balance_df, how="inner").copy()
+    df = income_t.join(balance_t, how="inner", lsuffix="_inc", rsuffix="_bal").copy()
     ratios = pd.DataFrame(index=df.index)
 
     def safe_div(a, b):
-        return a / b.replace({0: pd.NA})
+        if a is None or b is None:
+            return None
+        b2 = b.replace({0: pd.NA})
+        return a / b2
 
     revenue = df.get("Total Revenue")
     gross_profit = df.get("Gross Profit")
@@ -370,14 +441,11 @@ def compute_ratios_over_time(income_df: pd.DataFrame, balance_df: pd.DataFrame) 
     return ratios.dropna(axis=1, how="all")
 
 # ============================================================
-# APP HEADER
+# APP HEADER + NAV
 # ============================================================
 st.title("📊 Charts to Watch")
-st.caption("Ratio Dashboard = 2 tickers (A/B). Performance = up to 20 tickers. Fundamentals = pinned dashboard + growth + ratios.")
+st.caption("Ratio Dashboard = 2 tickers (A/B). Performance = up to 20 tickers. Fundamentals = pinned dashboard + any metric dropdown.")
 
-# ============================================================
-# NAVIGATION
-# ============================================================
 st.sidebar.header("Navigation")
 page = st.sidebar.radio("Go to", ["📊 Ratio Dashboard", "📈 Performance", "📑 Fundamentals", "📋 Cheat Sheet"], index=0)
 
@@ -610,276 +678,266 @@ elif page == "📈 Performance":
         st.info("Enter tickers, choose a period, then click **Plot Performance**.")
 
 # ============================================================
-# PAGE 3: FUNDAMENTALS (PINNED DASHBOARD + SINGLE METRIC)
+# PAGE 3: FUNDAMENTALS
 # ============================================================
 elif page == "📑 Fundamentals":
     st.subheader("📑 Fundamentals")
-    st.info("Pinned dashboard (Revenue, EPS, CAPEX, Net Margin) plus growth metrics and common ratios.")
+    st.info("Pinned dashboard + a dropdown to chart ANY Income / Balance / Cash Flow item, plus computed ratios & growth.")
 
-    left, right = st.columns([1, 2])
+    left, _ = st.columns([1, 2])
     with left:
-        fund_ticker = st.text_input("Ticker", value="AAPL").upper().strip()
+        fund_ticker = st.text_input("Ticker (stocks work best)", value="AAPL").upper().strip()
         frequency = st.radio("Frequency", ["Annual", "Quarterly"], horizontal=True)
 
         mode = st.radio("Mode", ["Pinned Dashboard", "Single Metric"], horizontal=True)
 
         scale = st.selectbox("Scale ($ items)", ["Raw", "Millions", "Billions"], index=2)
         chart_type = st.radio("Chart type", ["Line", "Bar"], horizontal=True)
+
         capex_positive = st.checkbox("Show CAPEX as positive spend", value=True)
+        show_other = st.checkbox("Show 'Other Fundamentals' dropdown", value=True)
 
-    with st.spinner("Loading fundamentals..."):
-        stmts = fetch_statements(fund_ticker, frequency=frequency)
-    income_df = stmts.get("income", pd.DataFrame())
-    balance_df = stmts.get("balance", pd.DataFrame())
-    cash_df = stmts.get("cash", pd.DataFrame())
+    with st.spinner("Loading statements..."):
+        stmts = fetch_statements_raw(fund_ticker, frequency=frequency)
 
-    if (income_df is None or income_df.empty) and (balance_df is None or balance_df.empty) and (cash_df is None or cash_df.empty):
-        st.error("No fundamentals data returned for this ticker/frequency. Try another ticker or switch Annual/Quarterly.")
+    income_raw = stmts.get("income_raw", pd.DataFrame())
+    balance_raw = stmts.get("balance_raw", pd.DataFrame())
+    cash_raw = stmts.get("cash_raw", pd.DataFrame())
+
+    if (income_raw is None or income_raw.empty) and (balance_raw is None or balance_raw.empty) and (cash_raw is None or cash_raw.empty):
+        st.error("No fundamentals data returned. Try a different ticker or switch Annual/Quarterly.")
     else:
-        # Column mapping
-        revenue_col = pick_first_existing_col(income_df, ["Total Revenue", "TotalRevenue"])
-        eps_col = pick_first_existing_col(income_df, ["Diluted EPS", "Basic EPS", "DilutedEPS", "BasicEPS"])
-        capex_col = pick_first_existing_col(cash_df, ["Capital Expenditures", "CapitalExpenditures"])
+        # Transposed for ratio computations (rows=dates, cols=line items)
+        income_t = income_raw.T if income_raw is not None and not income_raw.empty else pd.DataFrame()
+        balance_t = balance_raw.T if balance_raw is not None and not balance_raw.empty else pd.DataFrame()
+        ratios_t = compute_ratios_over_time(income_t, balance_t)
 
-        ratios_df = compute_ratios_over_time(income_df, balance_df)
+        # Robust line item mapping
+        revenue_row = find_line_item_row(income_raw, ["Total Revenue", "TotalRevenue", "Revenue"])
+        eps_row = find_line_item_row(income_raw, ["Diluted EPS", "Basic EPS", "DilutedEPS", "BasicEPS", "EPS"])
+        capex_row = find_line_item_row(
+            cash_raw,
+            [
+                "Capital Expenditures",
+                "CapitalExpenditures",
+                "Capital expenditure",
+                "Capital Expenditure",
+                "Purchase Of PPE",
+                "Purchase of PPE",
+                "Purchases of Property, Plant & Equipment",
+                "Purchase of property plant equipment",
+                "Investments in Property, Plant and Equipment",
+                "InvestmentsInPropertyPlantAndEquipment",
+            ],
+        )
 
-        def scaled(series: pd.Series, is_money: bool) -> pd.Series:
-            s = series.copy()
-            if not is_money:
-                return s
-            if scale == "Millions":
-                return s / 1_000_000
-            if scale == "Billions":
-                return s / 1_000_000_000
-            return s
-
-        def chart_and_table(series: pd.Series, title: str, y_label: str, fmt: str, is_money: bool, download_name: str):
-            # Chart
-            plot_series = scaled(series, is_money=is_money).dropna()
-            if plot_series.empty:
-                st.warning(f"No data for {title}.")
+        def plot_series_with_table(series: pd.Series, title: str, is_money: bool, as_percent: bool = False, as_ratio: bool = False):
+            if series is None or series.dropna().empty:
+                st.warning("No data available.")
                 return
 
-            fig, ax = plt.subplots(figsize=(6.2, 3.6))
-            if chart_type == "Bar":
-                ax.bar(plot_series.index.astype(str), plot_series.values)
-                ax.set_xticklabels(plot_series.index.strftime("%Y-%m-%d"), rotation=45, ha="right", fontsize=8)
+            s = series.dropna().copy()
+            if is_money:
+                s_plot = scaled_money(s, scale)
+                ylab = f"{title} ({'$B' if scale=='Billions' else '$M' if scale=='Millions' else '$'})"
             else:
-                ax.plot(plot_series.index, plot_series.values, linewidth=2)
+                s_plot = s
+                ylab = title
+
+            if as_percent:
+                s_plot = s_plot.copy()
+                ylab = title
+
+            fig, ax = plt.subplots(figsize=(12, 4.8))
+            if chart_type == "Bar":
+                ax.bar(s_plot.index.astype(str), s_plot.values)
+                ax.set_xticklabels(pd.to_datetime(s_plot.index).strftime("%Y-%m-%d"), rotation=45, ha="right")
+            else:
+                ax.plot(s_plot.index, s_plot.values, linewidth=2)
                 ax.grid(True, linestyle="--", alpha=0.35)
 
-            ax.set_title(title, fontsize=11)
-            ax.set_xlabel("")
-            ax.set_ylabel(y_label, fontsize=9)
+            ax.set_title(title, fontsize=13, fontweight="bold")
+            ax.set_xlabel("Period End")
+            ax.set_ylabel(ylab)
             plt.tight_layout()
             st.pyplot(fig)
 
-            # Table
-            tbl = series.to_frame(name=title).copy()
-            tbl.index = pd.to_datetime(tbl.index).strftime("%Y-%m-%d")
+            tbl = pd.DataFrame({title: s.values}, index=pd.to_datetime(s.index).strftime("%Y-%m-%d"))
 
-            if fmt == "percent":
-                tbl[title] = tbl[title].map(_fmt_percent)
-            elif fmt == "ratio":
-                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+            if as_percent:
+                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_percent)
+            elif as_ratio:
+                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_ratio)
             else:
-                # numbers/money shown in chosen scale for consistency
-                tmp = scaled(series, is_money=is_money)
-                tbl[title] = tmp.values
-                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(_fmt_number)
+                if is_money:
+                    tmp = scaled_money(s, scale)
+                    tbl[title] = pd.to_numeric(tmp.values, errors="coerce").map(fmt_number)
+                else:
+                    tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_number)
 
-            st.dataframe(tbl, use_container_width=True, height=210)
+            st.dataframe(tbl, use_container_width=True)
 
             st.download_button(
-                "📥 CSV",
+                "📥 Download CSV",
                 data=tbl.to_csv().encode("utf-8"),
-                file_name=download_name,
+                file_name=f"{fund_ticker}_{title.replace(' ', '_')}_{frequency}.csv",
                 mime="text/csv"
             )
 
+        # -----------------------------
+        # Other Fundamentals Dropdown
+        # -----------------------------
+        if show_other:
+            st.markdown("### 🔎 Other Fundamentals (Pick any metric)")
+            stmt_choice = st.selectbox("Statement", ["Income Statement", "Balance Sheet", "Cash Flow", "Computed Ratios"])
+
+            if stmt_choice == "Income Statement":
+                df_pick = income_raw
+                pick_from_index = True
+            elif stmt_choice == "Balance Sheet":
+                df_pick = balance_raw
+                pick_from_index = True
+            elif stmt_choice == "Cash Flow":
+                df_pick = cash_raw
+                pick_from_index = True
+            else:
+                df_pick = ratios_t
+                pick_from_index = False
+
+            if df_pick is None or df_pick.empty:
+                st.warning("No data available for that selection.")
+            else:
+                if pick_from_index:
+                    metric_choice = st.selectbox("Metric", list(df_pick.index))
+                    s = row_to_time_series(df_pick, metric_choice)
+                    # if user chooses a ratio-looking thing in cashflow/income, we still treat as numbers
+                    plot_series_with_table(s, title=f"{metric_choice}", is_money=True, as_percent=False, as_ratio=False)
+                else:
+                    metric_choice = st.selectbox("Metric", list(df_pick.columns))
+                    s = df_pick[metric_choice].dropna().copy()
+                    if metric_choice in ["Gross Margin", "Operating Margin", "Net Margin", "ROE", "ROA"]:
+                        s = (s * 100).dropna()
+                        plot_series_with_table(s, title=f"{metric_choice} (%)", is_money=False, as_percent=True, as_ratio=False)
+                    else:
+                        plot_series_with_table(s, title=metric_choice, is_money=False, as_percent=False, as_ratio=True)
+
+            st.markdown("---")
+
+        # -----------------------------
+        # Mode: Pinned Dashboard
+        # -----------------------------
         if mode == "Pinned Dashboard":
-            st.markdown(f"### {fund_ticker} — Pinned Fundamentals Dashboard ({frequency})")
-            st.caption("Four core charts + mini tables. Use Annual for longer history; Quarterly for more detail.")
+            st.markdown(f"### {fund_ticker} — Pinned Dashboard ({frequency})")
+            st.caption("Revenue • EPS • CAPEX • Net Margin (CAPEX/Net Margin depend on available data)")
 
             c1, c2 = st.columns(2)
             c3, c4 = st.columns(2)
 
-            # Revenue
             with c1:
                 st.markdown("#### Revenue")
-                if revenue_col:
-                    chart_and_table(
-                        income_df[revenue_col].dropna(),
-                        title="Revenue",
-                        y_label=f"Revenue ({'$B' if scale=='Billions' else '$M' if scale=='Millions' else '$'})",
-                        fmt="number",
-                        is_money=True,
-                        download_name=f"{fund_ticker}_revenue_{frequency}.csv"
-                    )
+                if revenue_row and income_raw is not None and not income_raw.empty:
+                    rev = row_to_time_series(income_raw, revenue_row)
+                    plot_series_with_table(rev, title="Revenue", is_money=True)
+                    st.markdown("**Revenue % Growth**")
+                    if not rev.empty:
+                        plot_series_with_table(pct_growth(rev).dropna(), title="Revenue Growth (%)", is_money=False, as_percent=True)
                 else:
-                    st.warning("Revenue not available for this ticker.")
+                    st.warning("Revenue not available for this ticker via Yahoo.")
 
-            # EPS
             with c2:
                 st.markdown("#### EPS")
-                if eps_col:
-                    chart_and_table(
-                        income_df[eps_col].dropna(),
-                        title="EPS",
-                        y_label="EPS",
-                        fmt="number",
-                        is_money=False,
-                        download_name=f"{fund_ticker}_eps_{frequency}.csv"
-                    )
+                if eps_row and income_raw is not None and not income_raw.empty:
+                    eps = row_to_time_series(income_raw, eps_row)
+                    plot_series_with_table(eps, title="EPS", is_money=False)
+                    st.markdown("**EPS % Growth**")
+                    if not eps.empty:
+                        plot_series_with_table(pct_growth(eps).dropna(), title="EPS Growth (%)", is_money=False, as_percent=True)
                 else:
-                    st.warning("EPS not available for this ticker.")
+                    st.warning("EPS not available for this ticker via Yahoo.")
 
-            # CAPEX
             with c3:
                 st.markdown("#### CAPEX")
-                if capex_col:
-                    raw = cash_df[capex_col].dropna()
-                    capex_series = (-raw if capex_positive else raw)
-                    chart_and_table(
-                        capex_series,
-                        title="CAPEX",
-                        y_label=f"CAPEX ({'$B' if scale=='Billions' else '$M' if scale=='Millions' else '$'})",
-                        fmt="number",
-                        is_money=True,
-                        download_name=f"{fund_ticker}_capex_{frequency}.csv"
-                    )
+                if capex_row and cash_raw is not None and not cash_raw.empty:
+                    cap = row_to_time_series(cash_raw, capex_row)
+                    if capex_positive:
+                        cap = -cap
+                    plot_series_with_table(cap, title="CAPEX", is_money=True)
+                    st.markdown("**CAPEX % Growth**")
+                    if not cap.empty:
+                        plot_series_with_table(pct_growth(cap).dropna(), title="CAPEX Growth (%)", is_money=False, as_percent=True)
                 else:
-                    st.warning("CAPEX not available for this ticker.")
+                    st.warning(
+                        "CAPEX not available from Yahoo for this ticker/frequency. "
+                        "Try Annual, or note Yahoo sometimes omits CAPEX even for large caps."
+                    )
 
-            # Net Margin
             with c4:
                 st.markdown("#### Net Margin")
-                if ratios_df is not None and not ratios_df.empty and "Net Margin" in ratios_df.columns:
-                    chart_and_table(
-                        (ratios_df["Net Margin"] * 100).dropna(),
-                        title="Net Margin (%)",
-                        y_label="Percent",
-                        fmt="percent",
-                        is_money=False,
-                        download_name=f"{fund_ticker}_net_margin_{frequency}.csv"
-                    )
+                if ratios_t is not None and not ratios_t.empty and "Net Margin" in ratios_t.columns:
+                    nm = (ratios_t["Net Margin"] * 100).dropna()
+                    plot_series_with_table(nm, title="Net Margin (%)", is_money=False, as_percent=True)
                 else:
-                    st.warning("Net Margin could not be computed for this ticker.")
+                    st.warning("Net Margin could not be computed (missing revenue/net income).")
 
+        # -----------------------------
+        # Mode: Single Metric (Pinned list)
+        # -----------------------------
         else:
-            # Single Metric mode: includes growth options + ratios
-            st.markdown(f"### {fund_ticker} — Single Fundamental Metric ({frequency})")
+            st.markdown(f"### {fund_ticker} — Single Metric ({frequency})")
 
-            pinned_options = []
-            if revenue_col:
-                pinned_options += ["Revenue", "Revenue % Growth"]
-            if eps_col:
-                pinned_options += ["EPS", "EPS % Growth"]
-            if capex_col:
-                pinned_options += ["CAPEX", "CAPEX % Growth"]
-
-            if ratios_df is not None and not ratios_df.empty:
+            options = []
+            if revenue_row:
+                options += ["Revenue", "Revenue % Growth"]
+            if eps_row:
+                options += ["EPS", "EPS % Growth"]
+            if capex_row:
+                options += ["CAPEX", "CAPEX % Growth"]
+            if ratios_t is not None and not ratios_t.empty:
                 for r in ["Gross Margin", "Operating Margin", "Net Margin", "ROE", "ROA", "Debt / Equity", "Current Ratio"]:
-                    if r in ratios_df.columns:
-                        pinned_options.append(r)
+                    if r in ratios_t.columns:
+                        options.append(r)
 
-            if not pinned_options:
-                st.error("Could not find Revenue/EPS/CAPEX or computed ratios for this ticker. Try another ticker.")
+            if not options:
+                st.error("No pinned fundamentals found. Try a different ticker or switch Annual/Quarterly.")
             else:
-                metric = st.selectbox("Choose metric", pinned_options)
-
-                series = None
-                fmt = "number"
-                is_money = False
-                y_label = metric
+                metric = st.selectbox("Pinned metric", options)
 
                 if metric == "Revenue":
-                    series = income_df[revenue_col].dropna()
-                    is_money = True
+                    s = row_to_time_series(income_raw, revenue_row)
+                    plot_series_with_table(s, title="Revenue", is_money=True)
+
                 elif metric == "Revenue % Growth":
-                    base = income_df[revenue_col].dropna()
-                    series = pct_growth(base).dropna()
-                    fmt = "percent"
+                    s = row_to_time_series(income_raw, revenue_row)
+                    plot_series_with_table(pct_growth(s).dropna(), title="Revenue Growth (%)", is_money=False, as_percent=True)
+
                 elif metric == "EPS":
-                    series = income_df[eps_col].dropna()
+                    s = row_to_time_series(income_raw, eps_row)
+                    plot_series_with_table(s, title="EPS", is_money=False)
+
                 elif metric == "EPS % Growth":
-                    base = income_df[eps_col].dropna()
-                    series = pct_growth(base).dropna()
-                    fmt = "percent"
+                    s = row_to_time_series(income_raw, eps_row)
+                    plot_series_with_table(pct_growth(s).dropna(), title="EPS Growth (%)", is_money=False, as_percent=True)
+
                 elif metric == "CAPEX":
-                    raw = cash_df[capex_col].dropna()
-                    series = (-raw if capex_positive else raw)
-                    is_money = True
+                    s = row_to_time_series(cash_raw, capex_row)
+                    if capex_positive:
+                        s = -s
+                    plot_series_with_table(s, title="CAPEX", is_money=True)
+
                 elif metric == "CAPEX % Growth":
-                    raw = cash_df[capex_col].dropna()
-                    base = (-raw if capex_positive else raw)
-                    series = pct_growth(base).dropna()
-                    fmt = "percent"
+                    s = row_to_time_series(cash_raw, capex_row)
+                    if capex_positive:
+                        s = -s
+                    plot_series_with_table(pct_growth(s).dropna(), title="CAPEX Growth (%)", is_money=False, as_percent=True)
+
                 else:
-                    # computed ratios
-                    series = ratios_df[metric].dropna()
+                    # ratios
+                    s = ratios_t[metric].dropna()
                     if metric in ["Gross Margin", "Operating Margin", "Net Margin", "ROE", "ROA"]:
-                        series = (series * 100).dropna()
-                        fmt = "percent"
+                        s = (s * 100).dropna()
+                        plot_series_with_table(s, title=f"{metric} (%)", is_money=False, as_percent=True)
                     else:
-                        fmt = "ratio"
-
-                if series is None or series.empty:
-                    st.warning("No data for that metric.")
-                else:
-                    # Full-width chart + table
-                    fig, ax = plt.subplots(figsize=(12, 5))
-                    plot_series = series.copy()
-
-                    if fmt == "number" and is_money:
-                        if scale == "Millions":
-                            plot_series = plot_series / 1_000_000
-                            y_label = f"{metric} ($M)"
-                        elif scale == "Billions":
-                            plot_series = plot_series / 1_000_000_000
-                            y_label = f"{metric} ($B)"
-                        else:
-                            y_label = f"{metric} ($)"
-
-                    if chart_type == "Bar":
-                        ax.bar(plot_series.index.astype(str), plot_series.values)
-                        ax.set_xticklabels(plot_series.index.strftime("%Y-%m-%d"), rotation=45, ha="right")
-                    else:
-                        ax.plot(plot_series.index, plot_series.values, linewidth=2)
-                        ax.grid(True, linestyle="--", alpha=0.35)
-
-                    ax.set_title(metric, fontsize=13, fontweight="bold")
-                    ax.set_xlabel("Period End")
-                    ax.set_ylabel(y_label)
-                    plt.tight_layout()
-                    st.pyplot(fig)
-
-                    tbl = series.to_frame(name=metric).copy()
-                    tbl.index = pd.to_datetime(tbl.index).strftime("%Y-%m-%d")
-
-                    if fmt == "percent":
-                        tbl[metric] = tbl[metric].map(_fmt_percent)
-                    elif fmt == "ratio":
-                        tbl[metric] = pd.to_numeric(tbl[metric], errors="coerce").map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-                    else:
-                        tmp = series.copy()
-                        if is_money:
-                            if scale == "Millions":
-                                tmp = tmp / 1_000_000
-                            elif scale == "Billions":
-                                tmp = tmp / 1_000_000_000
-                        tbl[metric] = tmp.values
-                        tbl[metric] = pd.to_numeric(tbl[metric], errors="coerce").map(_fmt_number)
-
-                    st.markdown("#### Data Table")
-                    st.dataframe(tbl, use_container_width=True)
-
-                    st.download_button(
-                        "📥 Download as CSV",
-                        data=tbl.to_csv().encode("utf-8"),
-                        file_name=f"{fund_ticker}_fundamentals_{metric.replace(' ', '_')}_{frequency}.csv",
-                        mime="text/csv"
-                    )
+                        plot_series_with_table(s, title=metric, is_money=False, as_ratio=True)
 
 # ============================================================
 # PAGE 4: CHEAT SHEET
