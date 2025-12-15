@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 import time as pytime
 
 plt.switch_backend("Agg")
@@ -188,41 +188,39 @@ RATIO_INFO = {
 }
 
 # ============================================================
-# PAGE HEADER
+# DATE RANGE HELPERS
 # ============================================================
-st.title("📊 Market Dashboard")
-st.write("Select a preset ratio from the sidebar, or use custom tickers in the Ratio Chart tab.")
+def start_date_from_preset(preset: str) -> str:
+    today = dt.today()
+    if preset == "YTD":
+        return f"{today.year}-01-01"
+    if preset == "1Y":
+        return (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    if preset == "3Y":
+        return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
+    if preset == "5Y":
+        return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+    # "Max" — practical default (Yahoo-like). You can change this if you want.
+    return "2000-01-01"
 
 # ============================================================
-# SIDEBAR SELECTION
-# ============================================================
-st.sidebar.header("📌 Preset Ratios")
-group_choice = st.sidebar.selectbox("Select category:", list(RATIO_GROUPS.keys()))
-label_choice = st.sidebar.radio("Select a ratio:", list(RATIO_GROUPS[group_choice].keys()))
-preset_a, preset_b = RATIO_GROUPS[group_choice][label_choice]
-
-# ============================================================
-# HELPERS
+# DATA HELPERS
 # ============================================================
 @st.cache_data(ttl=60 * 30)
 def fetch_close_series(ticker_symbol: str, start_date_str: str) -> pd.Series:
     df = yf.download(ticker_symbol, start=start_date_str, progress=False, auto_adjust=False)
     if df is None or df.empty or "Close" not in df.columns:
         return pd.Series(dtype=float)
-
     close = df["Close"]
-    # Safety in case "Close" is unexpectedly a DataFrame
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
-
     close = close.dropna()
-    close.name = ticker_symbol  # <-- FIX: don't use .rename(string)
+    close.name = ticker_symbol  # IMPORTANT: don't use .rename(string)
     return close
 
 def build_ratio_dataframe(sym_a: str, sym_b: str, start_date_str: str) -> pd.DataFrame:
     s_a = fetch_close_series(sym_a, start_date_str)
     s_b = fetch_close_series(sym_b, start_date_str)
-
     if s_a.empty or s_b.empty:
         return pd.DataFrame()
 
@@ -275,27 +273,50 @@ def fetch_company_names(ticker_list, sleep_seconds=0.35) -> dict:
     return name_map
 
 # ============================================================
+# PAGE HEADER
+# ============================================================
+st.title("📊 Market Dashboard")
+st.caption("Preset ratios + custom ratio charts + a cheat sheet + YTD performance.")
+
+# ============================================================
+# SIDEBAR = “CONTROL PANEL”
+# ============================================================
+st.sidebar.header("Controls")
+
+# Ratio selection
+st.sidebar.subheader("Preset Ratios")
+group_choice = st.sidebar.selectbox("Category", list(RATIO_GROUPS.keys()))
+label_choice = st.sidebar.radio("Ratio", list(RATIO_GROUPS[group_choice].keys()))
+preset_a, preset_b = RATIO_GROUPS[group_choice][label_choice]
+
+# Date preset
+st.sidebar.subheader("Date Range")
+date_preset = st.sidebar.radio("Preset", ["YTD", "1Y", "3Y", "5Y", "Max"], horizontal=True)
+start_date_ratio = start_date_from_preset(date_preset)
+
+# Custom ratio controls
+st.sidebar.subheader("Custom Ratio")
+use_custom = st.sidebar.checkbox("Use custom tickers", value=False)
+custom_a = st.sidebar.text_input("Custom ticker 1", value="SPY").upper().strip()
+custom_b = st.sidebar.text_input("Custom ticker 2", value="TLT").upper().strip()
+
+# Advanced
+st.sidebar.subheader("Advanced")
+with st.sidebar.expander("Chart Options", expanded=False):
+    show_ma = st.checkbox("Show moving averages", value=True)
+    log_scale = st.checkbox("Log scale (ratio axis)", value=False)
+    show_extremes = st.checkbox("Label high/low + latest", value=False)
+
+# ============================================================
 # TABS
 # ============================================================
 tab_ratio, tab_cheat, tab_ytd = st.tabs(["📊 Ratio Chart", "📋 Cheat Sheet", "📈 YTD Performance"])
 
 # ============================================================
-# TAB 1: RATIO CHART
+# TAB 1: RATIO CHART (PRO UI + PRESET DATES)
 # ============================================================
 with tab_ratio:
-    st.subheader("Custom Ratio (Optional) – keep at the top")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        use_custom = st.checkbox("Use custom tickers", value=False)
-    with c2:
-        custom_a = st.text_input("Custom first ticker", value="SPY").upper().strip()
-    with c3:
-        custom_b = st.text_input("Custom second ticker", value="TLT").upper().strip()
-
-    start_date_ratio = st.text_input("Start date (YYYY-MM-DD)", value="2015-01-01").strip()
-    st.markdown("---")
-
+    # Choose symbols + text content
     if use_custom:
         sym_a, sym_b = custom_a, custom_b
         title_text = f"Custom Ratio: {sym_a}/{sym_b}"
@@ -310,72 +331,110 @@ with tab_ratio:
         comm_text = info.get("commentary", "No commentary available.")
         csv_prefix = f"{sym_a}_{sym_b}_preset"
 
+    # Header + description
     st.subheader(title_text)
+    st.write(f"**Date Range:** {date_preset} (start: `{start_date_ratio}`)")
     st.markdown(f"**Description:** {desc_text}")
     st.markdown(f"**Commentary:** {comm_text}")
 
+    # Session state for downloads
     if "ratio_df" not in st.session_state:
         st.session_state["ratio_df"] = pd.DataFrame()
         st.session_state["ratio_name"] = ""
 
-    if st.button("Plot ratio"):
+    # Plot action
+    plot_col, _ = st.columns([1, 3])
+    with plot_col:
+        plot_clicked = st.button("Plot ratio", type="primary")
+
+    if plot_clicked:
         try:
             with st.spinner("Downloading data..."):
                 df_ratio = build_ratio_dataframe(sym_a, sym_b, start_date_ratio)
 
             if df_ratio.empty:
-                st.error("No valid data returned. Check tickers and/or start date.")
+                st.error("No valid data returned. Check tickers (or choose Max) and try again.")
             else:
                 st.session_state["ratio_df"] = df_ratio
                 st.session_state["ratio_name"] = f"{sym_a}/{sym_b}"
 
-                r = df_ratio["ratio"].dropna()
-                latest_val = float(r.iloc[-1])
-                prev_val = float(r.iloc[-2]) if len(r) > 1 else latest_val
-                delta_pct = (latest_val / prev_val - 1) * 100 if prev_val != 0 else 0.0
-
-                st.metric(
-                    label=f"Latest {sym_a}/{sym_b}",
-                    value=f"{latest_val:.3f}",
-                    delta=f"{delta_pct:+.2f}% vs prev close"
-                )
-
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(df_ratio.index, df_ratio["ratio"], label=f"{sym_a}/{sym_b} Ratio", linewidth=1.5)
-                if df_ratio["ma50"].notna().any():
-                    ax.plot(df_ratio.index, df_ratio["ma50"], label="50-day MA", linestyle="--", linewidth=1.2)
-                if df_ratio["ma200"].notna().any():
-                    ax.plot(df_ratio.index, df_ratio["ma200"], label="200-day MA", linestyle="--", linewidth=1.2)
-
-                ax.set_title(title_text, fontsize=13, fontweight="bold")
-                ax.set_xlabel("Date")
-                ax.set_ylabel("Ratio")
-                ax.grid(True, linestyle="--", alpha=0.4)
-                ax.legend()
-                plt.tight_layout()
-                st.pyplot(fig)
-
         except Exception as e:
             st.exception(e)
 
-    # CSV download after a successful plot
-    saved = st.session_state.get("ratio_df", pd.DataFrame())
-    if isinstance(saved, pd.DataFrame) and not saved.empty:
-        out = saved.copy()
+    # If we have data, show “professional” dashboard layout
+    df_saved = st.session_state.get("ratio_df", pd.DataFrame())
+    if isinstance(df_saved, pd.DataFrame) and not df_saved.empty:
+        r = df_saved["ratio"].dropna()
+        latest_val = float(r.iloc[-1])
+        prev_val = float(r.iloc[-2]) if len(r) > 1 else latest_val
+        delta_pct = (latest_val / prev_val - 1) * 100 if prev_val != 0 else 0.0
+
+        high_val = float(r.max())
+        high_date = r.idxmax()
+        low_val = float(r.min())
+        low_date = r.idxmin()
+        drawdown_pct = (latest_val / high_val - 1) * 100 if high_val != 0 else 0.0
+
+        # Metrics row
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Latest", f"{latest_val:.3f}", f"{delta_pct:+.2f}%")
+        m2.metric("High", f"{high_val:.3f}", high_date.strftime("%Y-%m-%d"))
+        m3.metric("Low", f"{low_val:.3f}", low_date.strftime("%Y-%m-%d"))
+        m4.metric("Drawdown from High", f"{drawdown_pct:.2f}%", "")
+
+        # Chart
+        fig, ax = plt.subplots(figsize=(11, 5))
+        ax.plot(df_saved.index, df_saved["ratio"], label=f"{sym_a}/{sym_b} Ratio", linewidth=1.7)
+
+        if show_ma:
+            if df_saved["ma50"].notna().any():
+                ax.plot(df_saved.index, df_saved["ma50"], label="50-day MA", linestyle="--", linewidth=1.2)
+            if df_saved["ma200"].notna().any():
+                ax.plot(df_saved.index, df_saved["ma200"], label="200-day MA", linestyle="--", linewidth=1.2)
+
+        if show_extremes:
+            # Markers
+            ax.scatter([high_date], [high_val], s=45)
+            ax.scatter([low_date], [low_val], s=45)
+            ax.scatter([r.index[-1]], [latest_val], s=45)
+
+            # Labels
+            ax.annotate(f"High {high_val:.3f}",
+                        xy=(high_date, high_val),
+                        xytext=(10, 10), textcoords="offset points")
+            ax.annotate(f"Low {low_val:.3f}",
+                        xy=(low_date, low_val),
+                        xytext=(10, -15), textcoords="offset points")
+            ax.annotate(f"Latest {latest_val:.3f}",
+                        xy=(r.index[-1], latest_val),
+                        xytext=(10, 0), textcoords="offset points")
+
+        ax.set_title(title_text, fontsize=13, fontweight="bold")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Ratio")
+        if log_scale:
+            ax.set_yscale("log")
+        ax.grid(True, linestyle="--", alpha=0.35)
+        ax.legend()
+        plt.tight_layout()
+        st.pyplot(fig)
+
+        # Downloads
+        df_export = df_saved.copy()
         ratio_lbl = st.session_state.get("ratio_name", "ratio")
-        out = out.rename(columns={
+        df_export = df_export.rename(columns={
             "ratio": f"{ratio_lbl}_ratio",
             "ma50": "MA50",
             "ma200": "MA200",
         })
         st.download_button(
             "📥 Download ratio series as CSV",
-            data=out.to_csv().encode("utf-8"),
-            file_name=f"{csv_prefix}_ratio_series.csv",
+            data=df_export.to_csv().encode("utf-8"),
+            file_name=f"{csv_prefix}_{date_preset}_ratio_series.csv",
             mime="text/csv"
         )
     else:
-        st.info("Click **Plot ratio** to generate the chart and enable CSV download.")
+        st.info("Click **Plot ratio** to generate the chart. Use the sidebar presets (YTD/1Y/3Y/5Y/Max) to change the time window.")
 
 # ============================================================
 # TAB 2: CHEAT SHEET
@@ -407,7 +466,7 @@ with tab_cheat:
     )
 
 # ============================================================
-# TAB 3: YTD PERFORMANCE (ORIGINAL STYLE)
+# TAB 3: YTD PERFORMANCE (UNCHANGED)
 # ============================================================
 with tab_ytd:
     st.subheader("📈 YTD Performance (% Change from Jan 1)")
