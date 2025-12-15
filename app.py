@@ -56,6 +56,9 @@ RATIO_GROUPS = {
     }
 }
 
+# ============================================================
+# DESCRIPTIONS + COMMENTARY
+# ============================================================
 RATIO_INFO = {
     "SPY / RSP – S&P 500 Cap vs Equal Weight": {
         "description": "Cap-weighted S&P 500 vs equal-weight; highlights breadth vs mega-cap concentration.",
@@ -185,9 +188,33 @@ RATIO_INFO = {
 }
 
 # ============================================================
-# DATE RANGE
+# DATE PRESETS
 # ============================================================
-def start_date_from_preset(preset: str) -> str:
+def period_start_date(preset: str) -> str:
+    today = dt.today()
+
+    if preset == "QTD":
+        quarter = (today.month - 1) // 3 + 1
+        start_month = 3 * (quarter - 1) + 1
+        return dt(today.year, start_month, 1).strftime("%Y-%m-%d")
+
+    if preset == "YTD":
+        return f"{today.year}-01-01"
+    if preset == "3M":
+        return (today - timedelta(days=92)).strftime("%Y-%m-%d")
+    if preset == "6M":
+        return (today - timedelta(days=183)).strftime("%Y-%m-%d")
+    if preset == "1Y":
+        return (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    if preset == "3Y":
+        return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
+    if preset == "5Y":
+        return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+
+    return "2000-01-01"  # Max (practical)
+
+def ratio_start_date_from_preset(preset: str) -> str:
+    # Keep ratios simpler (your original set)
     today = dt.today()
     if preset == "YTD":
         return f"{today.year}-01-01"
@@ -197,10 +224,10 @@ def start_date_from_preset(preset: str) -> str:
         return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
     if preset == "5Y":
         return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
-    return "2000-01-01"  # Max (practical)
+    return "2000-01-01"
 
 # ============================================================
-# DATA
+# DATA HELPERS
 # ============================================================
 @st.cache_data(ttl=60 * 30)
 def fetch_close_series(ticker_symbol: str, start_date_str: str) -> pd.Series:
@@ -237,8 +264,8 @@ def build_ratio_dataframe(sym_a: str, sym_b: str, start_date_str: str) -> pd.Dat
         "ma200": ma200
     })
 
-@st.cache_data(ttl=60 * 60)
-def fetch_ytd_close_prices(ticker_list, start_date_str, end_date_str) -> pd.DataFrame:
+@st.cache_data(ttl=60 * 30)
+def fetch_close_prices(ticker_list, start_date_str, end_date_str) -> pd.DataFrame:
     raw = yf.download(ticker_list, start=start_date_str, end=end_date_str, progress=False)
     if raw is None or raw.empty:
         return pd.DataFrame()
@@ -255,7 +282,7 @@ def fetch_ytd_close_prices(ticker_list, start_date_str, end_date_str) -> pd.Data
 
     return close_df.dropna(axis=1, how="all")
 
-def fetch_company_names(ticker_list, sleep_seconds=0.35) -> dict:
+def fetch_company_names(ticker_list, sleep_seconds=0.25) -> dict:
     names = {}
     for t in ticker_list:
         try:
@@ -270,26 +297,21 @@ def fetch_company_names(ticker_list, sleep_seconds=0.35) -> dict:
 # APP HEADER
 # ============================================================
 st.title("📊 Charts to Watch")
-st.caption("Two tools: (1) Ratio charts (two tickers) and (2) YTD performance (up to 10 tickers).")
+st.caption("Ratio Dashboard = 2 tickers (A/B). Performance = up to 20 tickers indexed to 100 at start of chosen period.")
 
 # ============================================================
-# NAVIGATION (THIS FIXES THE CONFUSION)
+# NAVIGATION
 # ============================================================
 st.sidebar.header("Navigation")
-page = st.sidebar.radio(
-    "Go to",
-    ["📊 Ratio Dashboard", "📈 YTD Performance", "📋 Cheat Sheet"],
-    index=0
-)
+page = st.sidebar.radio("Go to", ["📊 Ratio Dashboard", "📈 Performance", "📋 Cheat Sheet"], index=0)
 
 # ============================================================
 # PAGE 1: RATIO DASHBOARD
 # ============================================================
 if page == "📊 Ratio Dashboard":
     st.subheader("📊 Ratio Dashboard")
-    st.info("This page charts a **ratio of two symbols** (Symbol A / Symbol B). Use preset ratios or enter your own.")
+    st.info("Charts a **ratio of two symbols** (A/B) and shows each symbol’s latest price.")
 
-    # Sidebar controls specific to Ratio Dashboard
     st.sidebar.markdown("---")
     st.sidebar.subheader("Ratio Controls")
 
@@ -297,8 +319,8 @@ if page == "📊 Ratio Dashboard":
     label_choice = st.sidebar.radio("Preset ratios", list(RATIO_GROUPS[group_choice].keys()))
     preset_a, preset_b = RATIO_GROUPS[group_choice][label_choice]
 
-    date_preset = st.sidebar.radio("Date range", ["YTD", "1Y", "3Y", "5Y", "Max"], horizontal=True)
-    start_date_ratio = start_date_from_preset(date_preset)
+    date_preset_ratio = st.sidebar.radio("Date range", ["YTD", "1Y", "3Y", "5Y", "Max"], horizontal=True)
+    start_date_ratio = ratio_start_date_from_preset(date_preset_ratio)
 
     use_custom = st.sidebar.checkbox("Use custom tickers", value=False)
     custom_a = st.sidebar.text_input("Custom ticker 1", value="SPY").upper().strip()
@@ -309,7 +331,6 @@ if page == "📊 Ratio Dashboard":
         log_scale = st.checkbox("Log scale", value=False)
         show_extremes = st.checkbox("Label high/low/latest", value=False)
 
-    # Choose symbols + copy
     if use_custom:
         sym_a, sym_b = custom_a, custom_b
         title_text = f"Custom Ratio: {sym_a}/{sym_b}"
@@ -325,7 +346,7 @@ if page == "📊 Ratio Dashboard":
         csv_prefix = f"{sym_a}_{sym_b}_preset"
 
     st.markdown(f"### {title_text}")
-    st.write(f"**Date Range:** {date_preset} (start: `{start_date_ratio}`)")
+    st.write(f"**Date Range:** {date_preset_ratio} (start: `{start_date_ratio}`)")
     st.markdown(f"**Description:** {desc_text}")
     st.markdown(f"**Commentary:** {comm_text}")
 
@@ -348,18 +369,29 @@ if page == "📊 Ratio Dashboard":
     df_saved = st.session_state.get("ratio_df", pd.DataFrame())
     if isinstance(df_saved, pd.DataFrame) and not df_saved.empty:
         r = df_saved["ratio"].dropna()
-        latest_val = float(r.iloc[-1])
-        prev_val = float(r.iloc[-2]) if len(r) > 1 else latest_val
-        delta_pct = (latest_val / prev_val - 1) * 100 if prev_val != 0 else 0.0
-        high_val = float(r.max()); high_date = r.idxmax()
-        low_val = float(r.min()); low_date = r.idxmin()
-        drawdown_pct = (latest_val / high_val - 1) * 100 if high_val != 0 else 0.0
+        latest_ratio = float(r.iloc[-1])
+        prev_ratio = float(r.iloc[-2]) if len(r) > 1 else latest_ratio
+        ratio_delta_pct = (latest_ratio / prev_ratio - 1) * 100 if prev_ratio != 0 else 0.0
+        high_ratio = float(r.max()); high_date = r.idxmax()
+        low_ratio = float(r.min()); low_date = r.idxmin()
+        drawdown_pct = (latest_ratio / high_ratio - 1) * 100 if high_ratio != 0 else 0.0
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Latest", f"{latest_val:.3f}", f"{delta_pct:+.2f}%")
-        m2.metric("High", f"{high_val:.3f}", high_date.strftime("%Y-%m-%d"))
-        m3.metric("Low", f"{low_val:.3f}", low_date.strftime("%Y-%m-%d"))
-        m4.metric("Drawdown from High", f"{drawdown_pct:.2f}%", "")
+        a_series = df_saved[sym_a].dropna()
+        b_series = df_saved[sym_b].dropna()
+        a_last = float(a_series.iloc[-1])
+        a_prev = float(a_series.iloc[-2]) if len(a_series) > 1 else a_last
+        a_delta_pct = (a_last / a_prev - 1) * 100 if a_prev != 0 else 0.0
+        b_last = float(b_series.iloc[-1])
+        b_prev = float(b_series.iloc[-2]) if len(b_series) > 1 else b_last
+        b_delta_pct = (b_last / b_prev - 1) * 100 if b_prev != 0 else 0.0
+
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric(f"{sym_a} Price", f"{a_last:.2f}", f"{a_delta_pct:+.2f}%")
+        m2.metric(f"{sym_b} Price", f"{b_last:.2f}", f"{b_delta_pct:+.2f}%")
+        m3.metric("Ratio (A/B)", f"{latest_ratio:.3f}", f"{ratio_delta_pct:+.2f}%")
+        m4.metric("High", f"{high_ratio:.3f}", high_date.strftime("%Y-%m-%d"))
+        m5.metric("Low", f"{low_ratio:.3f}", low_date.strftime("%Y-%m-%d"))
+        m6.metric("Drawdown", f"{drawdown_pct:.2f}%", "")
 
         fig, ax = plt.subplots(figsize=(11, 5))
         ax.plot(df_saved.index, df_saved["ratio"], label=f"{sym_a}/{sym_b} Ratio", linewidth=1.7)
@@ -371,12 +403,12 @@ if page == "📊 Ratio Dashboard":
                 ax.plot(df_saved.index, df_saved["ma200"], label="200-day MA", linestyle="--", linewidth=1.2)
 
         if show_extremes:
-            ax.scatter([high_date], [high_val], s=45)
-            ax.scatter([low_date], [low_val], s=45)
-            ax.scatter([r.index[-1]], [latest_val], s=45)
-            ax.annotate(f"High {high_val:.3f}", xy=(high_date, high_val), xytext=(10, 10), textcoords="offset points")
-            ax.annotate(f"Low {low_val:.3f}", xy=(low_date, low_val), xytext=(10, -15), textcoords="offset points")
-            ax.annotate(f"Latest {latest_val:.3f}", xy=(r.index[-1], latest_val), xytext=(10, 0), textcoords="offset points")
+            ax.scatter([high_date], [high_ratio], s=45)
+            ax.scatter([low_date], [low_ratio], s=45)
+            ax.scatter([r.index[-1]], [latest_ratio], s=45)
+            ax.annotate(f"High {high_ratio:.3f}", xy=(high_date, high_ratio), xytext=(10, 10), textcoords="offset points")
+            ax.annotate(f"Low {low_ratio:.3f}", xy=(low_date, low_ratio), xytext=(10, -15), textcoords="offset points")
+            ax.annotate(f"Latest {latest_ratio:.3f}", xy=(r.index[-1], latest_ratio), xytext=(10, 0), textcoords="offset points")
 
         ax.set_title(title_text, fontsize=13, fontweight="bold")
         ax.set_xlabel("Date"); ax.set_ylabel("Ratio")
@@ -393,39 +425,39 @@ if page == "📊 Ratio Dashboard":
         st.download_button(
             "📥 Download ratio series as CSV",
             data=df_export.to_csv().encode("utf-8"),
-            file_name=f"{csv_prefix}_{date_preset}_ratio_series.csv",
+            file_name=f"{csv_prefix}_{date_preset_ratio}_ratio_series.csv",
             mime="text/csv"
         )
-    else:
-        st.info("Tip: This page is for **two-ticker ratios**. Click **Plot ratio** to generate the chart.")
 
 # ============================================================
-# PAGE 2: YTD PERFORMANCE
+# PAGE 2: PERFORMANCE (NEW RANGES + 20 TICKERS)
 # ============================================================
-elif page == "📈 YTD Performance":
-    st.subheader("📈 YTD Performance")
-    st.info("This page compares **up to 10 tickers** indexed to 100 on Jan 1 (YTD performance).")
+elif page == "📈 Performance":
+    st.subheader("📈 Performance")
+    st.info("Compares **up to 20 tickers**. Each line is indexed to **100 at the start of your selected period**.")
 
-    tickers_raw = st.text_input("Enter up to 10 tickers (comma-separated)", value="SPY, QQQ, IWM")
+    perf_preset = st.radio("Performance period", ["QTD", "YTD", "3M", "6M", "1Y", "3Y", "5Y", "Max"], horizontal=True)
+    start_perf = period_start_date(perf_preset)
+    end_perf = dt.today().strftime("%Y-%m-%d")
+
+    tickers_raw = st.text_input("Enter up to 20 tickers (comma-separated)", value="SPY, QQQ, IWM, TLT")
     ticker_list = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
 
-    if len(ticker_list) > 10:
-        st.warning("⚠️ More than 10 tickers entered. Only the first 10 will be used.")
-        ticker_list = ticker_list[:10]
+    if len(ticker_list) > 20:
+        st.warning("⚠️ More than 20 tickers entered. Only the first 20 will be used.")
+        ticker_list = ticker_list[:20]
 
-    start_ytd = f"{dt.now().year}-01-01"
-    end_ytd = dt.today().strftime("%Y-%m-%d")
     want_names = st.checkbox("🔎 Fetch company names (slower)", value=False)
 
-    if "ytd_export" not in st.session_state:
-        st.session_state["ytd_export"] = pd.DataFrame()
+    if "perf_export" not in st.session_state:
+        st.session_state["perf_export"] = pd.DataFrame()
 
-    if st.button("Plot YTD Performance", type="primary"):
+    if st.button("Plot Performance", type="primary"):
         if len(ticker_list) == 0:
             st.error("❌ No tickers entered.")
         else:
             with st.spinner("⏳ Downloading price data..."):
-                close_df = fetch_ytd_close_prices(ticker_list, start_ytd, end_ytd)
+                close_df = fetch_close_prices(ticker_list, start_perf, end_perf)
 
             if close_df.empty:
                 st.error("❌ No valid data returned. Check tickers and try again.")
@@ -435,8 +467,8 @@ elif page == "📈 YTD Performance":
                 if bad:
                     st.warning(f"⚠️ These tickers failed: {', '.join(bad)}")
 
-                ytd_idx = (close_df / close_df.iloc[0]) * 100
-                final_vals = ytd_idx.iloc[-1]
+                idx = (close_df / close_df.iloc[0]) * 100
+                final_vals = idx.iloc[-1]
 
                 if want_names:
                     with st.spinner("🔎 Fetching company names..."):
@@ -447,80 +479,69 @@ elif page == "📈 YTD Performance":
                 summary = pd.DataFrame({
                     "Ticker": final_vals.index,
                     "Name": [name_map[t] for t in final_vals.index],
-                    "YTD % Return": final_vals.values - 100
-                }).sort_values(by="YTD % Return", ascending=False)
+                    f"{perf_preset} % Return": final_vals.values - 100
+                }).sort_values(by=f"{perf_preset} % Return", ascending=False)
 
                 summary_display = summary.copy()
-                summary_display["YTD % Return"] = summary_display["YTD % Return"].map(lambda x: f"{x:.1f}%")
+                summary_display[f"{perf_preset} % Return"] = summary_display[f"{perf_preset} % Return"].map(lambda x: f"{x:.1f}%")
 
+                st.write(f"**Date Range:** {start_perf} → {end_perf}")
                 st.subheader("Summary")
                 st.dataframe(summary_display, use_container_width=True)
 
                 fig, ax = plt.subplots(figsize=(14, 9))
                 line_colors = {}
-                for t in ytd_idx.columns:
-                    line, = ax.plot(ytd_idx.index, ytd_idx[t], linewidth=2)
+                for t in idx.columns:
+                    line, = ax.plot(idx.index, idx[t], linewidth=2)
                     line_colors[t] = line.get_color()
 
                 ax.axhline(y=100, color="#888888", linestyle="--", linewidth=1.5)
 
                 sorted_tickers = final_vals.sort_values(ascending=False).index.tolist()
-                spacing_offset = 0.8
+                spacing_offset = 0.6
                 for rank, t in enumerate(sorted_tickers):
-                    last_date = ytd_idx.index[-1]
-                    last_value = ytd_idx[t].iloc[-1]
+                    last_date = idx.index[-1]
+                    last_value = idx[t].iloc[-1]
                     offset = spacing_offset * (len(sorted_tickers) - rank)
                     adjusted_y = last_value + offset
                     label_text = f"{t} ({last_value - 100:.1f}%)"
                     ax.text(
                         last_date, adjusted_y, label_text,
-                        fontsize=9, ha="left", va="center",
+                        fontsize=8, ha="left", va="center",
                         color=line_colors[t],
-                        bbox=dict(facecolor="white", edgecolor=line_colors[t], boxstyle="round,pad=0.3")
+                        bbox=dict(facecolor="white", edgecolor=line_colors[t], boxstyle="round,pad=0.25")
                     )
 
-                ax.set_title("YTD Performance (% Change from Jan 1)", fontsize=14)
+                ax.set_title(f"Performance ({perf_preset}) – Indexed to 100 at Period Start", fontsize=14)
                 ax.set_xlabel("Date")
                 ax.set_ylabel("Performance (Indexed to 100)")
                 ax.grid(True, linestyle="--", alpha=0.7)
 
-                table_ax = fig.add_axes([0.15, -0.27, 0.7, 0.15])
-                table_ax.axis("off")
-                table_ax.table(
-                    cellText=summary_display.values,
-                    colLabels=summary_display.columns,
-                    colLoc="center",
-                    cellLoc="center",
-                    loc="center",
-                    colWidths=[0.12, 0.50, 0.18]
-                )
-
                 plt.tight_layout()
-                plt.subplots_adjust(bottom=0.32)
                 st.pyplot(fig)
 
-                export_df = ytd_idx.copy()
+                export_df = idx.copy()
                 export_df.columns = [f"{c}_indexed100" for c in export_df.columns]
-                export_df = export_df.join((ytd_idx - 100).add_suffix("_ytd_pct"))
-                st.session_state["ytd_export"] = export_df
+                export_df = export_df.join((idx - 100).add_suffix(f"_{perf_preset.lower()}_pct"))
+                st.session_state["perf_export"] = export_df
 
-    saved_ytd = st.session_state.get("ytd_export", pd.DataFrame())
-    if isinstance(saved_ytd, pd.DataFrame) and not saved_ytd.empty:
+    saved_perf = st.session_state.get("perf_export", pd.DataFrame())
+    if isinstance(saved_perf, pd.DataFrame) and not saved_perf.empty:
         st.download_button(
-            "📥 Download YTD series as CSV",
-            data=saved_ytd.to_csv().encode("utf-8"),
-            file_name=f"ytd_performance_{dt.now().year}.csv",
+            "📥 Download performance series as CSV",
+            data=saved_perf.to_csv().encode("utf-8"),
+            file_name=f"performance_{perf_preset}_{dt.now().year}.csv",
             mime="text/csv"
         )
     else:
-        st.info("Tip: This page is for **multi-ticker YTD**. Click **Plot YTD Performance** to generate the chart.")
+        st.info("Enter tickers, choose a period (QTD/YTD/3M/6M/1Y/3Y/5Y/Max), then click **Plot Performance**.")
 
 # ============================================================
 # PAGE 3: CHEAT SHEET
 # ============================================================
 else:
     st.subheader("📋 Cheat Sheet")
-    st.info("This page lists all preset ratios with descriptions and commentary (no chart).")
+    st.info("Lists all preset ratios with descriptions and commentary (no chart).")
 
     rows = []
     for cat, ratios in RATIO_GROUPS.items():
