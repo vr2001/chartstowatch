@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime as dt, timedelta
 import time as pytime
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Tuple
 
 plt.switch_backend("Agg")
 st.set_page_config(page_title="Charts to Watch", layout="wide")
@@ -221,6 +221,9 @@ def ratio_start_date_from_preset(preset: str) -> str:
 def pct_growth(series: pd.Series) -> pd.Series:
     return series.pct_change() * 100
 
+def safe_to_numeric(s: pd.Series) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce")
+
 def fmt_percent(x) -> str:
     return f"{x:.2f}%" if pd.notna(x) else ""
 
@@ -230,9 +233,6 @@ def fmt_number(x) -> str:
 def fmt_ratio(x) -> str:
     return f"{x:.3f}" if pd.notna(x) else ""
 
-def safe_to_numeric(s: pd.Series) -> pd.Series:
-    return pd.to_numeric(s, errors="coerce")
-
 def scaled_money(series: pd.Series, scale: str) -> pd.Series:
     s = series.copy()
     if scale == "Millions":
@@ -241,15 +241,10 @@ def scaled_money(series: pd.Series, scale: str) -> pd.Series:
         return s / 1_000_000_000
     return s
 
-def find_line_item_row(df_raw: pd.DataFrame, candidates: list) -> Optional[str]:
-    """
-    Finds a line item in df_raw.index using flexible matching.
-    df_raw format: rows = line items, columns = dates
-    """
+def find_line_item_row(df_raw: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     if df_raw is None or df_raw.empty:
         return None
 
-    # Build a normalized map of index labels
     idx = [str(x).strip() for x in df_raw.index]
     idx_norm_map = {x.lower(): x for x in idx}
 
@@ -258,7 +253,6 @@ def find_line_item_row(df_raw: pd.DataFrame, candidates: list) -> Optional[str]:
         if key in idx_norm_map:
             return idx_norm_map[key]
 
-    # fallback: contains match
     for c in candidates:
         key = str(c).strip().lower()
         for raw_label in idx:
@@ -268,9 +262,6 @@ def find_line_item_row(df_raw: pd.DataFrame, candidates: list) -> Optional[str]:
     return None
 
 def row_to_time_series(df_raw: pd.DataFrame, row_name: str) -> pd.Series:
-    """
-    df_raw row -> Series indexed by datetime (period end)
-    """
     s = df_raw.loc[row_name].copy()
     if isinstance(s, pd.DataFrame):
         s = s.iloc[0]
@@ -278,6 +269,66 @@ def row_to_time_series(df_raw: pd.DataFrame, row_name: str) -> pd.Series:
     s.index = pd.to_datetime(s.index, errors="coerce")
     s = s.loc[s.index.notna()].sort_index()
     return s.dropna()
+
+# ============================================================
+# PLOTTING HELPERS (DATA LABELS THAT WORK FOR LINE + BAR)
+# ============================================================
+def _format_for_labels(val: float, is_money: bool, scale: str, as_percent: bool, as_ratio: bool) -> str:
+    if pd.isna(val):
+        return ""
+    if as_percent:
+        return f"{val:.1f}%"
+    if as_ratio:
+        return f"{val:.2f}"
+    if is_money:
+        # val is already scaled for plotting
+        if scale == "Billions":
+            return f"{val:.2f}B"
+        if scale == "Millions":
+            return f"{val:.0f}M"
+        return f"{val:,.0f}"
+    return f"{val:,.2f}"
+
+def add_data_labels(ax, x_vals, y_vals, chart_type: str, label_kwargs=None):
+    """
+    Adds aligned data labels. Works for line or bar.
+    - For line: labels above each point with consistent offset.
+    - For bar: labels above each bar with consistent offset.
+    """
+    if label_kwargs is None:
+        label_kwargs = {}
+
+    if chart_type == "Line":
+        for x, y, txt in zip(x_vals, y_vals, label_kwargs["texts"]):
+            if txt == "":
+                continue
+            ax.annotate(
+                txt,
+                xy=(x, y),
+                xytext=(0, 6),  # aligned offset
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                clip_on=True
+            )
+    else:
+        # bars: x_vals are positions or string labels; use patches instead
+        for rect, txt in zip(ax.patches, label_kwargs["texts"]):
+            if txt == "":
+                continue
+            x = rect.get_x() + rect.get_width() / 2
+            y = rect.get_height()
+            ax.annotate(
+                txt,
+                xy=(x, y),
+                xytext=(0, 5),  # aligned offset
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                clip_on=True
+            )
 
 # ============================================================
 # PRICE / PERFORMANCE DATA HELPERS
@@ -341,15 +392,10 @@ def fetch_company_names(ticker_list, sleep_seconds=0.25) -> dict:
     return names
 
 # ============================================================
-# FUNDAMENTALS: RELIABLE STATEMENT GETTERS
+# FUNDAMENTALS: STATEMENTS + TTM + VALUATION MULTIPLES
 # ============================================================
 @st.cache_data(ttl=60 * 60)
 def fetch_statements_raw(ticker: str, frequency: str = "Annual") -> Dict[str, pd.DataFrame]:
-    """
-    Returns raw statements:
-      rows = line items, columns = period end dates (datetime)
-    Uses get_* methods first, then falls back.
-    """
     t = yf.Ticker(ticker)
     freq = "yearly" if frequency == "Annual" else "quarterly"
 
@@ -363,7 +409,6 @@ def fetch_statements_raw(ticker: str, frequency: str = "Annual") -> Dict[str, pd
         out = out.apply(pd.to_numeric, errors="coerce")
         return out
 
-    # Prefer modern getter methods
     income = pd.DataFrame()
     balance = pd.DataFrame()
     cash = pd.DataFrame()
@@ -381,7 +426,6 @@ def fetch_statements_raw(ticker: str, frequency: str = "Annual") -> Dict[str, pd
     except Exception:
         pass
 
-    # Fallbacks
     if income is None or income.empty:
         income = t.financials if frequency == "Annual" else t.quarterly_financials
     if balance is None or balance.empty:
@@ -391,11 +435,14 @@ def fetch_statements_raw(ticker: str, frequency: str = "Annual") -> Dict[str, pd
 
     return {"income_raw": _clean(income), "balance_raw": _clean(balance), "cash_raw": _clean(cash)}
 
+@st.cache_data(ttl=60 * 60)
+def fetch_ticker_info(ticker: str) -> Dict:
+    try:
+        return yf.Ticker(ticker).info
+    except Exception:
+        return {}
+
 def compute_ratios_over_time(income_t: pd.DataFrame, balance_t: pd.DataFrame) -> pd.DataFrame:
-    """
-    income_t, balance_t: transposed statements
-      rows = dates, cols = line items
-    """
     if income_t is None or income_t.empty or balance_t is None or balance_t.empty:
         return pd.DataFrame()
 
@@ -440,11 +487,89 @@ def compute_ratios_over_time(income_t: pd.DataFrame, balance_t: pd.DataFrame) ->
 
     return ratios.dropna(axis=1, how="all")
 
+def compute_ttm_from_quarterly_series(s: pd.Series) -> pd.Series:
+    """
+    TTM for a quarterly flow series: rolling sum of last 4 quarters.
+    """
+    if s is None or s.dropna().empty:
+        return pd.Series(dtype=float)
+    s2 = s.sort_index().dropna()
+    return s2.rolling(4).sum()
+
+def align_price_to_period_ends(price: pd.Series, period_ends: pd.DatetimeIndex) -> pd.Series:
+    """
+    Returns price at (or just before) each period end.
+    """
+    if price is None or price.empty or len(period_ends) == 0:
+        return pd.Series(dtype=float)
+
+    px = price.sort_index().dropna()
+    out = []
+    for d in period_ends:
+        # last available close on or before d
+        sub = px.loc[:d]
+        out.append(sub.iloc[-1] if not sub.empty else pd.NA)
+    s = pd.Series(out, index=period_ends)
+    return pd.to_numeric(s, errors="coerce").dropna()
+
+def compute_enterprise_value_series(
+    price_at_dates: pd.Series,
+    shares_outstanding: Optional[float],
+    balance_t: pd.DataFrame
+) -> pd.Series:
+    """
+    EV ≈ market cap + total debt - cash
+    market cap ≈ price * sharesOutstanding (sharesOutstanding is latest; approximation)
+    debt/cash use balance sheet per date (if available)
+    """
+    if price_at_dates is None or price_at_dates.empty or shares_outstanding in [None, 0, pd.NA]:
+        return pd.Series(dtype=float)
+
+    # Try to find debt + cash line items
+    debt_candidates = [
+        "Total Debt", "TotalDebt",
+        "Long Term Debt", "LongTermDebt",
+        "Short Long Term Debt", "ShortLongTermDebt",
+        "Short Term Debt", "ShortTermDebt",
+        "Long Term Debt And Capital Lease Obligation"
+    ]
+    cash_candidates = [
+        "Cash And Cash Equivalents", "CashAndCashEquivalents",
+        "Cash", "Cash And Short Term Investments", "CashAndShortTermInvestments",
+        "Cash Financial"
+    ]
+
+    total_debt = pd.Series(index=price_at_dates.index, dtype=float)
+    cash = pd.Series(index=price_at_dates.index, dtype=float)
+
+    if balance_t is not None and not balance_t.empty:
+        # balance_t: rows = dates, cols = line items
+        debt_col = None
+        cash_col = None
+
+        for c in debt_candidates:
+            if c in balance_t.columns:
+                debt_col = c
+                break
+        for c in cash_candidates:
+            if c in balance_t.columns:
+                cash_col = c
+                break
+
+        if debt_col is not None:
+            total_debt = pd.to_numeric(balance_t.loc[price_at_dates.index, debt_col], errors="coerce")
+        if cash_col is not None:
+            cash = pd.to_numeric(balance_t.loc[price_at_dates.index, cash_col], errors="coerce")
+
+    mkt_cap = price_at_dates * float(shares_outstanding)
+    ev = mkt_cap + total_debt.fillna(0) - cash.fillna(0)
+    return pd.to_numeric(ev, errors="coerce").dropna()
+
 # ============================================================
 # APP HEADER + NAV
 # ============================================================
 st.title("📊 Charts to Watch")
-st.caption("Ratio Dashboard = 2 tickers (A/B). Performance = up to 20 tickers. Fundamentals = pinned dashboard + any metric dropdown.")
+st.caption("Ratio Dashboard = 2 tickers (A/B). Performance = up to 20 tickers. Fundamentals = pinned dashboard + any metric dropdown + TTM + valuation multiples.")
 
 st.sidebar.header("Navigation")
 page = st.sidebar.radio("Go to", ["📊 Ratio Dashboard", "📈 Performance", "📑 Fundamentals", "📋 Cheat Sheet"], index=0)
@@ -678,17 +803,16 @@ elif page == "📈 Performance":
         st.info("Enter tickers, choose a period, then click **Plot Performance**.")
 
 # ============================================================
-# PAGE 3: FUNDAMENTALS
+# PAGE 3: FUNDAMENTALS (TTM + VALUATION MULTIPLES + DATA LABELS)
 # ============================================================
 elif page == "📑 Fundamentals":
     st.subheader("📑 Fundamentals")
-    st.info("Pinned dashboard + a dropdown to chart ANY Income / Balance / Cash Flow item, plus computed ratios & growth.")
+    st.info("Pinned dashboard + dropdown metrics + **TTM fundamentals** + **valuation multiples** + aligned data labels for Line/Bar charts.")
 
     left, _ = st.columns([1, 2])
     with left:
         fund_ticker = st.text_input("Ticker (stocks work best)", value="AAPL").upper().strip()
         frequency = st.radio("Frequency", ["Annual", "Quarterly"], horizontal=True)
-
         mode = st.radio("Mode", ["Pinned Dashboard", "Single Metric"], horizontal=True)
 
         scale = st.selectbox("Scale ($ items)", ["Raw", "Millions", "Billions"], index=2)
@@ -697,8 +821,11 @@ elif page == "📑 Fundamentals":
         capex_positive = st.checkbox("Show CAPEX as positive spend", value=True)
         show_other = st.checkbox("Show 'Other Fundamentals' dropdown", value=True)
 
+        show_data_labels = st.checkbox("Show data labels on charts", value=True)
+
     with st.spinner("Loading statements..."):
         stmts = fetch_statements_raw(fund_ticker, frequency=frequency)
+        info = fetch_ticker_info(fund_ticker)
 
     income_raw = stmts.get("income_raw", pd.DataFrame())
     balance_raw = stmts.get("balance_raw", pd.DataFrame())
@@ -707,54 +834,79 @@ elif page == "📑 Fundamentals":
     if (income_raw is None or income_raw.empty) and (balance_raw is None or balance_raw.empty) and (cash_raw is None or cash_raw.empty):
         st.error("No fundamentals data returned. Try a different ticker or switch Annual/Quarterly.")
     else:
-        # Transposed for ratio computations (rows=dates, cols=line items)
         income_t = income_raw.T if income_raw is not None and not income_raw.empty else pd.DataFrame()
         balance_t = balance_raw.T if balance_raw is not None and not balance_raw.empty else pd.DataFrame()
+        cash_t = cash_raw.T if cash_raw is not None and not cash_raw.empty else pd.DataFrame()
+
         ratios_t = compute_ratios_over_time(income_t, balance_t)
 
+        # ------------------------------------------------------------
         # Robust line item mapping
+        # ------------------------------------------------------------
         revenue_row = find_line_item_row(income_raw, ["Total Revenue", "TotalRevenue", "Revenue"])
         eps_row = find_line_item_row(income_raw, ["Diluted EPS", "Basic EPS", "DilutedEPS", "BasicEPS", "EPS"])
+        net_income_row = find_line_item_row(income_raw, ["Net Income", "NetIncome"])
+        ebitda_row = find_line_item_row(income_raw, ["EBITDA", "Ebitda"])
+
         capex_row = find_line_item_row(
             cash_raw,
             [
-                "Capital Expenditures",
-                "CapitalExpenditures",
-                "Capital expenditure",
-                "Capital Expenditure",
-                "Purchase Of PPE",
-                "Purchase of PPE",
+                "Capital Expenditures", "CapitalExpenditures",
+                "Purchase Of PPE", "Purchase of PPE",
                 "Purchases of Property, Plant & Equipment",
-                "Purchase of property plant equipment",
-                "Investments in Property, Plant and Equipment",
                 "InvestmentsInPropertyPlantAndEquipment",
             ],
         )
 
-        def plot_series_with_table(series: pd.Series, title: str, is_money: bool, as_percent: bool = False, as_ratio: bool = False):
+        # For EV calc
+        shares_outstanding = info.get("sharesOutstanding", None)
+
+        # ------------------------------------------------------------
+        # Plot + Table unified function (with aligned data labels)
+        # ------------------------------------------------------------
+        def plot_series_with_table(
+            series: pd.Series,
+            title: str,
+            is_money: bool,
+            as_percent: bool = False,
+            as_ratio: bool = False,
+        ):
             if series is None or series.dropna().empty:
                 st.warning("No data available.")
                 return
 
-            s = series.dropna().copy()
+            s = series.dropna().sort_index().copy()
+
+            # scale only for plotting + display if money
             if is_money:
                 s_plot = scaled_money(s, scale)
                 ylab = f"{title} ({'$B' if scale=='Billions' else '$M' if scale=='Millions' else '$'})"
             else:
-                s_plot = s
-                ylab = title
-
-            if as_percent:
-                s_plot = s_plot.copy()
+                s_plot = s.copy()
                 ylab = title
 
             fig, ax = plt.subplots(figsize=(12, 4.8))
+
+            # Build data-label strings (aligned across all charts)
+            label_texts = [
+                _format_for_labels(v, is_money=is_money, scale=scale, as_percent=as_percent, as_ratio=as_ratio)
+                for v in s_plot.values
+            ]
+
             if chart_type == "Bar":
-                ax.bar(s_plot.index.astype(str), s_plot.values)
-                ax.set_xticklabels(pd.to_datetime(s_plot.index).strftime("%Y-%m-%d"), rotation=45, ha="right")
+                x_str = pd.to_datetime(s_plot.index).strftime("%Y-%m-%d").tolist()
+                ax.bar(x_str, s_plot.values)
+                ax.set_xticklabels(x_str, rotation=45, ha="right")
+
+                if show_data_labels:
+                    add_data_labels(ax, x_str, s_plot.values, "Bar", label_kwargs={"texts": label_texts})
+
             else:
-                ax.plot(s_plot.index, s_plot.values, linewidth=2)
+                ax.plot(s_plot.index, s_plot.values, linewidth=2, marker="o")
                 ax.grid(True, linestyle="--", alpha=0.35)
+
+                if show_data_labels:
+                    add_data_labels(ax, s_plot.index, s_plot.values, "Line", label_kwargs={"texts": label_texts})
 
             ax.set_title(title, fontsize=13, fontweight="bold")
             ax.set_xlabel("Period End")
@@ -762,18 +914,18 @@ elif page == "📑 Fundamentals":
             plt.tight_layout()
             st.pyplot(fig)
 
-            tbl = pd.DataFrame({title: s.values}, index=pd.to_datetime(s.index).strftime("%Y-%m-%d"))
-
+            # Table (unscaled money display depending on scale)
+            tbl = pd.DataFrame(index=pd.to_datetime(s.index).strftime("%Y-%m-%d"))
             if as_percent:
-                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_percent)
+                tbl[title] = pd.to_numeric(s, errors="coerce").map(fmt_percent)
             elif as_ratio:
-                tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_ratio)
+                tbl[title] = pd.to_numeric(s, errors="coerce").map(fmt_ratio)
             else:
                 if is_money:
                     tmp = scaled_money(s, scale)
                     tbl[title] = pd.to_numeric(tmp, errors="coerce").map(fmt_number)
                 else:
-                    tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_number)
+                    tbl[title] = pd.to_numeric(s, errors="coerce").map(fmt_number)
 
             st.dataframe(tbl, use_container_width=True)
 
@@ -783,6 +935,107 @@ elif page == "📑 Fundamentals":
                 file_name=f"{fund_ticker}_{title.replace(' ', '_')}_{frequency}.csv",
                 mime="text/csv"
             )
+
+        # ============================================================
+        # TTM FUNDAMENTALS (Quarterly only)
+        # ============================================================
+        st.markdown("### 🧾 TTM Fundamentals & Valuation Multiples")
+
+        if frequency != "Quarterly":
+            st.info("TTM and valuation multiples are best computed from **Quarterly** statements. Switch frequency to Quarterly to enable full TTM + multiples.")
+        else:
+            # Build core series
+            rev_q = row_to_time_series(income_raw, revenue_row) if revenue_row else pd.Series(dtype=float)
+            eps_q = row_to_time_series(income_raw, eps_row) if eps_row else pd.Series(dtype=float)
+            ni_q = row_to_time_series(income_raw, net_income_row) if net_income_row else pd.Series(dtype=float)
+            ebitda_q = row_to_time_series(income_raw, ebitda_row) if ebitda_row else pd.Series(dtype=float)
+
+            # TTM series
+            rev_ttm = compute_ttm_from_quarterly_series(rev_q)
+            eps_ttm = compute_ttm_from_quarterly_series(eps_q)  # EPS per quarter summed → TTM EPS
+            ni_ttm = compute_ttm_from_quarterly_series(ni_q)
+            ebitda_ttm = compute_ttm_from_quarterly_series(ebitda_q)
+
+            # Price series to align with period ends
+            # Use enough lookback to cover periods
+            start_px = (rev_ttm.index.min() - pd.Timedelta(days=20)).strftime("%Y-%m-%d") if not rev_ttm.empty else "2000-01-01"
+            px = fetch_close_series(fund_ticker, start_px)
+
+            # Align price to the same dates as TTM series
+            common_dates = rev_ttm.index.intersection(px.index) if not rev_ttm.empty else pd.DatetimeIndex([])
+            # Use TTM index dates as "period ends"
+            px_at = align_price_to_period_ends(px, rev_ttm.index)
+
+            # Valuation multiples
+            pe_ttm = pd.Series(dtype=float)
+            ev_ebitda_ttm = pd.Series(dtype=float)
+
+            # P/E (TTM) = Price / EPS_TTM
+            if not px_at.empty and not eps_ttm.empty:
+                pe_ttm = (px_at / eps_ttm.reindex(px_at.index)).replace([pd.NA, float("inf"), -float("inf")], pd.NA).dropna()
+
+            # EV/EBITDA (TTM)
+            if not px_at.empty and shares_outstanding and not balance_t.empty and not ebitda_ttm.empty:
+                # EV needs balance sheet aligned to same dates
+                bal_aligned = balance_t.reindex(px_at.index)
+                ev_series = compute_enterprise_value_series(px_at, shares_outstanding, bal_aligned)
+                ev_ebitda_ttm = (ev_series / ebitda_ttm.reindex(ev_series.index)).replace([pd.NA, float("inf"), -float("inf")], pd.NA).dropna()
+
+            # Display block
+            m1, m2, m3, m4 = st.columns(4)
+
+            def latest_val(s: pd.Series) -> Tuple[str, str]:
+                if s is None or s.dropna().empty:
+                    return "—", ""
+                v = float(s.dropna().iloc[-1])
+                d = s.dropna().index[-1].strftime("%Y-%m-%d")
+                return f"{v:,.2f}", d
+
+            with m1:
+                v, d = latest_val(scaled_money(rev_ttm, "Billions"))
+                st.metric("Revenue TTM ($B)", v, d)
+
+            with m2:
+                v, d = latest_val(eps_ttm)
+                st.metric("EPS TTM", v, d)
+
+            with m3:
+                v, d = latest_val(pe_ttm)
+                st.metric("P/E (TTM)", v, d)
+
+            with m4:
+                v, d = latest_val(ev_ebitda_ttm)
+                st.metric("EV/EBITDA (TTM)", v, d)
+
+            st.caption("EV uses an approximation: EV ≈ (Price × sharesOutstanding) + TotalDebt − Cash. sharesOutstanding comes from Yahoo 'info' (latest), so historical EV is approximate.")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                if not rev_ttm.empty:
+                    plot_series_with_table(rev_ttm, "Revenue (TTM)", is_money=True)
+                else:
+                    st.warning("Revenue TTM unavailable (missing quarterly revenue).")
+
+            with c2:
+                if not eps_ttm.empty:
+                    plot_series_with_table(eps_ttm, "EPS (TTM)", is_money=False)
+                else:
+                    st.warning("EPS TTM unavailable (missing quarterly EPS).")
+
+            c3, c4 = st.columns(2)
+            with c3:
+                if not pe_ttm.empty:
+                    plot_series_with_table(pe_ttm, "P/E (TTM)", is_money=False, as_ratio=True)
+                else:
+                    st.warning("P/E (TTM) unavailable (missing price or EPS TTM).")
+
+            with c4:
+                if not ev_ebitda_ttm.empty:
+                    plot_series_with_table(ev_ebitda_ttm, "EV/EBITDA (TTM)", is_money=False, as_ratio=True)
+                else:
+                    st.warning("EV/EBITDA (TTM) unavailable (missing EBITDA TTM and/or EV components).")
+
+        st.markdown("---")
 
         # -----------------------------
         # Other Fundamentals Dropdown
@@ -810,7 +1063,6 @@ elif page == "📑 Fundamentals":
                 if pick_from_index:
                     metric_choice = st.selectbox("Metric", list(df_pick.index))
                     s = row_to_time_series(df_pick, metric_choice)
-                    # if user chooses a ratio-looking thing in cashflow/income, we still treat as numbers
                     plot_series_with_table(s, title=f"{metric_choice}", is_money=True, as_percent=False, as_ratio=False)
                 else:
                     metric_choice = st.selectbox("Metric", list(df_pick.columns))
@@ -866,10 +1118,7 @@ elif page == "📑 Fundamentals":
                     if not cap.empty:
                         plot_series_with_table(pct_growth(cap).dropna(), title="CAPEX Growth (%)", is_money=False, as_percent=True)
                 else:
-                    st.warning(
-                        "CAPEX not available from Yahoo for this ticker/frequency. "
-                        "Try Annual, or note Yahoo sometimes omits CAPEX even for large caps."
-                    )
+                    st.warning("CAPEX not available from Yahoo for this ticker/frequency. Try Annual or note Yahoo sometimes omits CAPEX.")
 
             with c4:
                 st.markdown("#### Net Margin")
@@ -880,7 +1129,7 @@ elif page == "📑 Fundamentals":
                     st.warning("Net Margin could not be computed (missing revenue/net income).")
 
         # -----------------------------
-        # Mode: Single Metric (Pinned list)
+        # Mode: Single Metric
         # -----------------------------
         else:
             st.markdown(f"### {fund_ticker} — Single Metric ({frequency})")
@@ -931,7 +1180,6 @@ elif page == "📑 Fundamentals":
                     plot_series_with_table(pct_growth(s).dropna(), title="CAPEX Growth (%)", is_money=False, as_percent=True)
 
                 else:
-                    # ratios
                     s = ratios_t[metric].dropna()
                     if metric in ["Gross Margin", "Operating Margin", "Net Margin", "ROE", "ROA"]:
                         s = (s * 100).dropna()
