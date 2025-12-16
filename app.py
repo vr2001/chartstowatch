@@ -771,7 +771,7 @@ elif page == "📑 Fundamentals":
             else:
                 if is_money:
                     tmp = scaled_money(s, scale)
-                    tbl[title] = pd.to_numeric(tmp.values, errors="coerce").map(fmt_number)
+                    tbl[title] = pd.to_numeric(tmp, errors="coerce").map(fmt_number)
                 else:
                     tbl[title] = pd.to_numeric(tbl[title], errors="coerce").map(fmt_number)
 
