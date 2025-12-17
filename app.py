@@ -2,6 +2,7 @@ import os
 import time as pytime
 from datetime import datetime as dt, timedelta
 from typing import Optional, Dict, List, Tuple
+import requests
 
 import numpy as np
 import pandas as pd
@@ -1472,3 +1473,231 @@ else:
         file_name="ratio_cheat_sheet.csv",
         mime="text/csv"
     )
+# ============================================================
+# FRED HELPERS (Economic v1)
+# ============================================================
+FRED_SERIES = {
+    "Growth": {
+        "INDPRO": "Industrial Production Index (INDPRO)",
+        "PAYEMS": "Total Nonfarm Payrolls (PAYEMS)",
+    },
+    "Inflation": {
+        "CPIAUCSL": "CPI All Items (CPIAUCSL)",
+        "CPILFESL": "Core CPI (CPILFESL)",
+    },
+    "Rates": {
+        "DGS2": "2Y Treasury (DGS2)",
+        "DGS10": "10Y Treasury (DGS10)",
+    },
+    "Stress": {
+        "STLFSI4": "St. Louis Fed Financial Stress Index (STLFSI4)",
+        "NFCI": "Chicago Fed National Financial Conditions Index (NFCI)",
+    },
+}
+
+def _get_fred_key() -> str:
+    # Prefer Streamlit secrets, fallback to env var
+    try:
+        k = st.secrets.get("FRED_API_KEY", "")
+    except Exception:
+        k = ""
+    if not k:
+        k = os.getenv("FRED_API_KEY", "")
+    return k
+
+def econ_start_date_from_preset(preset: str) -> str:
+    today = dt.today()
+    if preset == "1Y":
+        return (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    if preset == "3Y":
+        return (today - timedelta(days=365 * 3)).strftime("%Y-%m-%d")
+    if preset == "5Y":
+        return (today - timedelta(days=365 * 5)).strftime("%Y-%m-%d")
+    if preset == "10Y":
+        return (today - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+    return "1900-01-01"  # Max
+
+@st.cache_data(ttl=60 * 60)
+def fetch_fred_series(series_id: str, start_date: str) -> pd.Series:
+    api_key = _get_fred_key()
+    if not api_key:
+        return pd.Series(dtype=float, name=series_id)
+
+    url = "https://api.stlouisfed.org/fred/series/observations"
+    params = {
+        "series_id": series_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "observation_start": start_date,
+    }
+
+    try:
+        r = requests.get(url, params=params, timeout=20)
+        r.raise_for_status()
+        js = r.json()
+        obs = js.get("observations", [])
+        if not obs:
+            return pd.Series(dtype=float, name=series_id)
+
+        df = pd.DataFrame(obs)
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        s = df.dropna(subset=["date"]).set_index("date")["value"].dropna()
+        s.name = series_id
+        return s.sort_index()
+    except Exception:
+        return pd.Series(dtype=float, name=series_id)
+
+def transform_series(s: pd.Series, transform: str) -> pd.Series:
+    s = s.dropna().sort_index()
+    if s.empty:
+        return s
+
+    if transform == "Level":
+        return s
+
+    if transform == "YoY %":
+        # works for monthly/weekly/etc; uses 12 periods for monthly-ish, 52 for weekly-ish not guaranteed
+        # better: approximate by 365D shift
+        return (s / s.shift(365, freq="D") - 1.0) * 100
+
+    if transform == "MoM %":
+        return s.pct_change() * 100
+
+    return s
+
+def plot_econ_series(s: pd.Series, title: str, y_label: str):
+    fig, ax = plt.subplots(figsize=(12, 4.8))
+    ax.plot(s.index, s.values, linewidth=2)
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.set_xlabel("Date")
+    ax.set_ylabel(y_label)
+    ax.grid(True, linestyle="--", alpha=0.35)
+    plt.tight_layout()
+    st.pyplot(fig)
+
+def render_economic_page():
+    st.subheader("📉 Economic (FRED) — v1")
+    st.info("Growth • Inflation • Rates • Stress — FRED-only. No user API key required.")
+
+    # Sidebar controls (Economic-only)
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Economic Controls")
+
+    date_preset = st.sidebar.radio("Date range", ["1Y", "3Y", "5Y", "10Y", "Max"], index=2, horizontal=True)
+    start_date = econ_start_date_from_preset(date_preset)
+
+    transform = st.sidebar.radio("Transform", ["Level", "YoY %", "MoM %"], index=0, horizontal=True)
+
+    # Key check
+    if not _get_fred_key():
+        st.error("FRED API key not found. Add it to Streamlit secrets as FRED_API_KEY (recommended) or set env var FRED_API_KEY.")
+        return
+
+    tab_growth, tab_infl, tab_rates, tab_stress = st.tabs(["📈 Growth", "🔥 Inflation", "🏦 Rates", "⚠️ Stress"])
+
+    # -------- Growth
+    with tab_growth:
+        sid = st.selectbox("Series", list(FRED_SERIES["Growth"].keys()), index=0, key="econ_growth_sid")
+        label = FRED_SERIES["Growth"][sid]
+        s = fetch_fred_series(sid, start_date)
+        s2 = transform_series(s, transform)
+
+        st.caption(label)
+        if s2.empty:
+            st.warning("No data returned for this series/date range.")
+        else:
+            ylab = f"{sid} ({transform})"
+            plot_econ_series(s2, f"{label} — {transform}", ylab)
+
+            df_out = pd.DataFrame({sid: s2})
+            st.dataframe(df_out.tail(20), use_container_width=True)
+            st.download_button(
+                "📥 Download CSV",
+                data=df_out.to_csv().encode("utf-8"),
+                file_name=f"econ_{sid}_{transform.replace(' ','').replace('%','pct')}_{date_preset}.csv",
+                mime="text/csv",
+            )
+
+    # -------- Inflation
+    with tab_infl:
+        sid = st.selectbox("Series", list(FRED_SERIES["Inflation"].keys()), index=0, key="econ_infl_sid")
+        label = FRED_SERIES["Inflation"][sid]
+        s = fetch_fred_series(sid, start_date)
+        s2 = transform_series(s, transform)
+
+        st.caption(label)
+        if s2.empty:
+            st.warning("No data returned for this series/date range.")
+        else:
+            ylab = f"{sid} ({transform})"
+            plot_econ_series(s2, f"{label} — {transform}", ylab)
+
+            df_out = pd.DataFrame({sid: s2})
+            st.dataframe(df_out.tail(20), use_container_width=True)
+            st.download_button(
+                "📥 Download CSV",
+                data=df_out.to_csv().encode("utf-8"),
+                file_name=f"econ_{sid}_{transform.replace(' ','').replace('%','pct')}_{date_preset}.csv",
+                mime="text/csv",
+            )
+
+    # -------- Rates
+    with tab_rates:
+        st.caption("Treasury yields from FRED. Also shows the 10Y–2Y curve.")
+        s2y = fetch_fred_series("DGS2", start_date)
+        s10y = fetch_fred_series("DGS10", start_date)
+
+        # Align
+        df = pd.concat([s2y, s10y], axis=1).dropna()
+        if df.empty:
+            st.warning("No rate data returned for this date range.")
+        else:
+            df["Curve_10Y_2Y"] = df["DGS10"] - df["DGS2"]
+
+            # Choose plot
+            which = st.radio("Plot", ["2Y", "10Y", "10Y–2Y Curve"], index=2, horizontal=True)
+            if which == "2Y":
+                s = transform_series(df["DGS2"], transform)
+                plot_econ_series(s, "2Y Treasury — " + transform, "Percent")
+                out = pd.DataFrame({"DGS2": s})
+            elif which == "10Y":
+                s = transform_series(df["DGS10"], transform)
+                plot_econ_series(s, "10Y Treasury — " + transform, "Percent")
+                out = pd.DataFrame({"DGS10": s})
+            else:
+                # Curve: Level only makes most sense; still allow transform for consistency
+                s = transform_series(df["Curve_10Y_2Y"], transform)
+                plot_econ_series(s, "10Y–2Y Curve — " + transform, "Percentage Points")
+                out = pd.DataFrame({"Curve_10Y_2Y": s})
+
+            st.dataframe(out.tail(20), use_container_width=True)
+            st.download_button(
+                "📥 Download CSV",
+                data=out.to_csv().encode("utf-8"),
+                file_name=f"econ_rates_{which.replace('–','_').replace(' ','_')}_{transform.replace(' ','').replace('%','pct')}_{date_preset}.csv",
+                mime="text/csv",
+            )
+
+    # -------- Stress
+    with tab_stress:
+        sid = st.selectbox("Series", list(FRED_SERIES["Stress"].keys()), index=0, key="econ_stress_sid")
+        label = FRED_SERIES["Stress"][sid]
+        s = fetch_fred_series(sid, start_date)
+        s2 = transform_series(s, transform)
+
+        st.caption(label)
+        if s2.empty:
+            st.warning("No data returned for this series/date range.")
+        else:
+            ylab = f"{sid} ({transform})"
+            plot_econ_series(s2, f"{label} — {transform}", ylab)
+
+            df_out = pd.DataFrame({sid: s2})
+            st.dataframe(df_out.tail(20), use_container_width=True)
+            st.download_button(
+                "📥 Download CSV",
+                data=df_out.to_csv().encode("utf-8"),
+                file_name=f"econ_{sid}_{transform.replace(' ','').replace('%','pct')}_{date_preset}.csv",
+                mime="text/csv",
+            )
