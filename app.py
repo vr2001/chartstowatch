@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import yfinance as yf
 
+
+
 plt.switch_backend("Agg")
 st.set_page_config(page_title="Charts to Watch", layout="wide")
 
