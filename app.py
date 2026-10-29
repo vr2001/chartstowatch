@@ -1,14 +1,3 @@
-elif stmt_choice == "Cash Flow":
-                df_pick = cash_raw; pick_from_index = True
-            else:
-                df_pick = ratios_t; pick_from_index = False
-
-            if df_pick is None or df_pick.empty:
-                st.warning("No data available for that selection.")
-            else:
-                if pick_from_index:
-                    metric_choice = st.selectbox("Metric", list(df_pick.index))
-                    s = row_to_time_series(df_pick, metric_choice)
                     plot_series_with_table(s, title=f"{metric_choice}", is_money=True)
                 else:
                     metric_choice = st.selectbox("Metric", list(df_pick.columns))
