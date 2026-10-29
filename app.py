@@ -1,96 +1,113 @@
-import os
-import time as pytime
-from datetime import datetime as dt, timedelta
-from typing import Optional, Dict, List, Tuple
-import requests
+elif stmt_choice == "Cash Flow":
+                df_pick = cash_raw; pick_from_index = True
+            else:
+                df_pick = ratios_t; pick_from_index = False
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import streamlit as st
-import yfinance as yf
+            if df_pick is None or df_pick.empty:
+                st.warning("No data available for that selection.")
+            else:
+                if pick_from_index:
+                    metric_choice = st.selectbox("Metric", list(df_pick.index))
+                    s = row_to_time_series(df_pick, metric_choice)
+                    plot_series_with_table(s, title=f"{metric_choice}", is_money=True)
+                else:
+                    metric_choice = st.selectbox("Metric", list(df_pick.columns))
+                    s = df_pick[metric_choice].dropna().copy()
+                    if metric_choice in ["Gross Margin", "Operating Margin", "Net Margin", "ROE", "ROA"]:
+                        s = (s * 100).dropna()
+                        plot_series_with_table(s, title=f"{metric_choice} (%)", is_money=False, as_percent=True)
+                    else:
+                        plot_series_with_table(s, title=metric_choice, is_money=False, as_ratio=True)
 
+        st.markdown("---")
+        if mode == "Pinned Dashboard":
+            st.markdown(f"### {fund_ticker} — Pinned Dashboard ({frequency})")
+            st.caption("Revenue • EPS • CAPEX • Net Margin")
 
+            c1, c2 = st.columns(2)
+            c3, c4 = st.columns(2)
 
-plt.switch_backend("Agg")
-st.set_page_config(page_title="Charts to Watch", page_icon="📊", layout="wide")
-st.markdown("""
-<style>
-.block-container { max-width: 1440px; padding-top: 2rem; }
-h1 { letter-spacing: -0.04em; }
-h2, h3 { letter-spacing: -0.02em; }
-[data-testid="stMetric"] {
-    background: #ffffff; border: 1px solid #dce5eb;
-    border-radius: 12px; padding: 1rem;
-}
-[data-testid="stSidebar"] { border-right: 1px solid #dce5eb; }
-[data-testid="stSidebar"] h1 { font-size: 1.5rem; }
-div.stButton > button[kind="primary"] { border-radius: 8px; }
-@media (max-width: 640px) {
-    .block-container { padding: 1rem; }
-    [data-testid="stMetric"] { padding: 0.65rem; }
-}
-</style>
-""", unsafe_allow_html=True)
-plt.rcParams.update({
-    "axes.spines.top": False, "axes.spines.right": False,
-    "axes.labelcolor": "#475569", "text.color": "#172b3a",
-    "xtick.color": "#475569", "ytick.color": "#475569",
-    "axes.prop_cycle": plt.cycler(color=["#0f766e", "#2563eb", "#d97706", "#9333ea", "#e11d48"]),
-})
+            with c1:
+                st.markdown("#### Revenue")
+                if revenue_row and income_raw is not None and not income_raw.empty:
+                    rev = row_to_time_series(income_raw, revenue_row)
+                    plot_series_with_table(rev, title="Revenue", is_money=True)
+                    st.markdown("**Revenue % Growth**")
+                    if not rev.empty:
+                        plot_series_with_table(pct_growth(rev).dropna(), title="Revenue Growth (%)", is_money=False, as_percent=True)
+                else:
+                    st.warning("Revenue not available for this ticker via Yahoo.")
+
+            with c2:
+                st.markdown("#### EPS")
+                if eps_row and income_raw is not None and not income_raw.empty:
+                    eps = row_to_time_series(income_raw, eps_row)
+                    plot_series_with_table(eps, title="EPS", is_money=False)
+                    st.markdown("**EPS % Growth**")
+                    if not eps.empty:
+                        plot_series_with_table(pct_growth(eps).dropna(), title="EPS Growth (%)", is_money=False, as_percent=True)
+                else:
+                    st.warning("EPS not available for this ticker via Yahoo.")
+
+            with c3:
+                st.markdown("#### CAPEX")
+                if capex_row and cash_raw is not None and not cash_raw.empty:
+                    cap = row_to_time_series(cash_raw, capex_row)
+                    if capex_positive:
+                        cap = -cap
+                    plot_series_with_table(cap, title="CAPEX", is_money=True)
+                    st.markdown("**CAPEX % Growth**")
+                    if not cap.empty:
+                        plot_series_with_table(pct_growth(cap).dropna(), title="CAPEX Growth (%)", is_money=False, as_percent=True)
+                else:
+                    st.warning("CAPEX not available from Yahoo for this ticker/frequency.")
+
+            with c4:
+                st.markdown("#### Net Margin")
+                if ratios_t is not None and not ratios_t.empty and "Net Margin" in ratios_t.columns:
+                    nm = (ratios_t["Net Margin"] * 100).dropna()
+                    plot_series_with_table(nm, title="Net Margin (%)", is_money=False, as_percent=True)
+                else:
+                    st.warning("Net Margin could not be computed (missing revenue/net income).")
 
 # ============================================================
-# PRESET RATIOS (GROUPED)
+# PAGE 4: TECHNICALS
 # ============================================================
-RATIO_GROUPS = {
-    "📈 Stock Market Breadth & Strength": {
-        "SPY / RSP – S&P 500 Cap vs Equal Weight": ("SPY", "RSP"),
-        "QQQ / IWM – Nasdaq 100 vs Russell 2000": ("QQQ", "IWM"),
-        "DIA / IWM – Dow vs Small Caps": ("DIA", "IWM"),
-        "MGK / SPY – Mega Cap Growth vs S&P 500": ("MGK", "SPY"),
-    },
-    "🔄 Risk-On vs Risk-Off Sentiment": {
-        "SPY / TLT – Stocks vs Long-Term Bonds": ("SPY", "TLT"),
-        "HYG / IEF – High Yield vs Treasuries": ("HYG", "IEF"),
-        "XLY / XLP – Discretionary vs Staples": ("XLY", "XLP"),
-        "IWM / SHY – Small Caps vs Short Treasuries": ("IWM", "SHY"),
-        "SPHB / SPLV – High Beta vs Low Vol": ("SPHB", "SPLV"),
-    },
-    "🏭 Sector Relative Strength": {
-        "XLF / SPY – Financials vs Market": ("XLF", "SPY"),
-        "XLV / SPY – Healthcare vs Market": ("XLV", "SPY"),
-        "XLE / SPY – Energy vs Market": ("XLE", "SPY"),
-        "XLK / SPY – Tech vs Market": ("XLK", "SPY"),
-        "XLI / SPY – Industrials vs Market": ("XLI", "SPY"),
-        "RSPD / RSPS – Equal Disc vs Equal Staples": ("RSPD", "RSPS"),
-    },
-    "🛢️ Commodities & Inflation Indicators": {
-        "DBC / SPY – Commodities vs Stocks": ("DBC", "SPY"),
-        "GDX / SPY – Gold Miners vs Market": ("GDX", "SPY"),
-        "GLD / TLT – Gold vs Bonds": ("GLD", "TLT"),
-        "USO / SPY – Oil vs Stocks": ("USO", "SPY"),
-        "TIP / TLT – TIPS vs Treasuries": ("TIP", "TLT"),
-        "CPER / GLD – Copper vs Gold": ("CPER", "GLD"),
-        "GLD / USO – Gold vs Oil": ("GLD", "USO"),
-        "GLD / XME – Gold vs Metals & Mining": ("GLD", "XME"),
-    },
-    "🌍 Global vs U.S. Market Strength": {
-        "EEM / SPY – Emerging Markets vs U.S.": ("EEM", "SPY"),
-        "VEA / SPY – Developed Intl vs U.S.": ("VEA", "SPY"),
-        "FXI / SPY – China vs U.S.": ("FXI", "SPY"),
-    },
-    "₿ Crypto Relative Strength": {
-        "ETHA / IBIT – ETH vs BTC ETF": ("ETHA", "IBIT"),
-        "ETHA / GSOL – ETH vs Solana": ("ETHA", "GSOL"),
-        "BMNR / ETHA – BMNR vs ETH": ("BMNR", "ETHA"),
-        "MSTR / IBIT – MicroStrategy vs BTC ETF": ("MSTR", "IBIT"),
-    }
-}
+elif page == "🧭 Technicals":
+    render_technicals_page()
 
-RATIO_INFO = {
-    "SPY / RSP – S&P 500 Cap vs Equal Weight": {
-        "description": "Cap-weighted S&P 500 vs equal-weight; highlights breadth vs mega-cap concentration.",
-        "commentary": "Rising = narrow leadership (mega-caps dominate). Falling = broader participation (healthier breadth).",
-    },
-    "QQQ / IWM – Nasdaq 100 vs Russell 2000": {
-        "description": "Large-cap growth/tech vs small caps; growth leadership + risk appetite gauge.",
+# ============================================================
+# PAGE 5: ECONOMIC (FRED)
+# ============================================================
+elif page == "📉 Economic (FRED)":
+    render_economic_page()
+
+# ============================================================
+# PAGE 6: CHEAT SHEET
+# ============================================================
+else:
+    st.subheader("📋 Cheat Sheet")
+    st.info("Lists all preset ratios with descriptions and commentary (no chart).")
+
+    rows = []
+    for cat, ratios in RATIO_GROUPS.items():
+        for lbl, (a, b) in ratios.items():
+            info = RATIO_INFO.get(lbl, {})
+            rows.append({
+                "Category": cat,
+                "Label": lbl,
+                "Symbol 1": a,
+                "Symbol 2": b,
+                "Description": info.get("description", ""),
+                "Commentary": info.get("commentary", "")
+            })
+
+    cheat_df = pd.DataFrame(rows)
+    st.dataframe(cheat_df, use_container_width=True)
+
+    st.download_button(
+        "📥 Download cheat sheet as CSV",
+        data=cheat_df.to_csv(index=False).encode("utf-8"),
+        file_name="ratio_cheat_sheet.csv",
+        mime="text/csv"
+    )
