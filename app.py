@@ -1,11 +1,10 @@
-import time as pytime
-from datetime import datetime as dt, timedelta
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
 import yfinance as yf
+
+from datetime import datetime, timedelta
 
 plt.switch_backend("Agg")
 
@@ -15,22 +14,22 @@ st.set_page_config(
 )
 
 # ============================================================
-# PRESET RATIOS
+# MARKET RATIO PRESETS
 # ============================================================
 
 RATIO_GROUPS = {
-    "Stock Market Breadth & Strength": {
+    "Market Breadth & Strength": {
         "SPY / RSP - Cap vs Equal Weight": ("SPY", "RSP"),
         "QQQ / IWM - Nasdaq vs Small Caps": ("QQQ", "IWM"),
         "DIA / IWM - Dow vs Small Caps": ("DIA", "IWM"),
-        "MGK / SPY - Mega Cap Growth vs Market": ("MGK", "SPY"),
+        "MGK / SPY - Mega Cap Growth": ("MGK", "SPY"),
     },
-    "Risk-On vs Risk-Off Sentiment": {
+    "Risk-On vs Risk-Off": {
         "SPY / TLT - Stocks vs Bonds": ("SPY", "TLT"),
-        "HYG / IEF - High Yield vs Treasuries": ("HYG", "IEF"),
-        "XLY / XLP - Discretionary vs Staples": ("XLY", "XLP"),
-        "IWM / SHY - Small Caps vs Treasuries": ("IWM", "SHY"),
-        "SPHB / SPLV - High Beta vs Low Volatility": ("SPHB", "SPLV"),
+        "HYG / IEF - Credit Risk": ("HYG", "IEF"),
+        "XLY / XLP - Consumer Sentiment": ("XLY", "XLP"),
+        "IWM / SHY - Small Cap Risk": ("IWM", "SHY"),
+        "SPHB / SPLV - High Beta vs Low Vol": ("SPHB", "SPLV"),
     },
     "Sector Relative Strength": {
         "XLF / SPY - Financials": ("XLF", "SPY"),
@@ -38,24 +37,28 @@ RATIO_GROUPS = {
         "XLE / SPY - Energy": ("XLE", "SPY"),
         "XLK / SPY - Technology": ("XLK", "SPY"),
         "XLI / SPY - Industrials": ("XLI", "SPY"),
+        "XLB / SPY - Materials": ("XLB", "SPY"),
+        "XLU / SPY - Utilities": ("XLU", "SPY"),
+        "XLRE / SPY - Real Estate": ("XLRE", "SPY"),
+        "XLC / SPY - Communication": ("XLC", "SPY"),
         "RSPD / RSPS - Equal Weight Consumer": ("RSPD", "RSPS"),
     },
     "Commodities & Inflation": {
-        "DBC / SPY - Commodities vs Stocks": ("DBC", "SPY"),
-        "GDX / SPY - Gold Miners vs Stocks": ("GDX", "SPY"),
+        "DBC / SPY - Commodities": ("DBC", "SPY"),
+        "GDX / SPY - Gold Miners": ("GDX", "SPY"),
         "GLD / TLT - Gold vs Bonds": ("GLD", "TLT"),
         "USO / SPY - Oil vs Stocks": ("USO", "SPY"),
-        "TIP / TLT - TIPS vs Treasuries": ("TIP", "TLT"),
+        "TIP / TLT - Inflation": ("TIP", "TLT"),
         "CPER / GLD - Copper vs Gold": ("CPER", "GLD"),
         "GLD / USO - Gold vs Oil": ("GLD", "USO"),
         "GLD / XME - Gold vs Metals": ("GLD", "XME"),
     },
-    "Global vs U.S. Markets": {
+    "International Markets": {
         "EEM / SPY - Emerging Markets": ("EEM", "SPY"),
         "VEA / SPY - Developed Markets": ("VEA", "SPY"),
-        "FXI / SPY - China vs U.S.": ("FXI", "SPY"),
+        "FXI / SPY - China vs US": ("FXI", "SPY"),
     },
-    "Crypto Relative Strength": {
+    "Cryptocurrency": {
         "ETHA / IBIT - Ethereum vs Bitcoin": ("ETHA", "IBIT"),
         "ETHA / GSOL - Ethereum vs Solana": ("ETHA", "GSOL"),
         "BMNR / ETHA - BMNR vs Ethereum": ("BMNR", "ETHA"),
@@ -63,151 +66,56 @@ RATIO_GROUPS = {
     }
 }
 
-
-# ============================================================
-# RATIO DESCRIPTIONS
-# ============================================================
-
 RATIO_INFO = {
-    "SPY/RSP": (
-        "Capital-weighted vs equal-weight S&P 500.",
-        "Rising = narrow leadership. Falling = broader participation."
-    ),
-    "QQQ/IWM": (
-        "Large-cap growth vs small-cap stocks.",
-        "Rising = large-cap growth leadership."
-    ),
-    "DIA/IWM": (
-        "Blue-chip stocks vs small caps.",
-        "Rising may indicate preference for established companies."
-    ),
-    "MGK/SPY": (
-        "Mega-cap growth vs the broader market.",
-        "Rising = mega-cap growth leadership."
-    ),
-    "SPY/TLT": (
-        "Stocks vs long-term Treasury bonds.",
-        "Rising may indicate risk-on sentiment."
-    ),
-    "HYG/IEF": (
-        "High-yield corporate bonds vs Treasuries.",
-        "Falling may indicate increasing credit stress."
-    ),
-    "XLY/XLP": (
-        "Consumer discretionary vs consumer staples.",
-        "Rising may indicate stronger consumer confidence."
-    ),
-    "IWM/SHY": (
-        "Small-cap stocks vs short-term Treasuries.",
-        "Rising may indicate increasing risk appetite."
-    ),
-    "SPHB/SPLV": (
-        "High-beta vs low-volatility stocks.",
-        "Rising = increasing demand for aggressive equities."
-    ),
-    "XLF/SPY": (
-        "Financial stocks vs the broader market.",
-        "Rising = financial sector leadership."
-    ),
-    "XLV/SPY": (
-        "Healthcare vs the broader market.",
-        "Rising may indicate defensive rotation."
-    ),
-    "XLE/SPY": (
-        "Energy vs the broader market.",
-        "Rising = energy sector leadership."
-    ),
-    "XLK/SPY": (
-        "Technology vs the broader market.",
-        "Rising = technology sector leadership."
-    ),
-    "XLI/SPY": (
-        "Industrials vs the broader market.",
-        "Rising may indicate stronger industrial expectations."
-    ),
-    "RSPD/RSPS": (
-        "Equal-weight discretionary vs staples.",
-        "Rising may indicate broad consumer risk appetite."
-    ),
-    "DBC/SPY": (
-        "Commodities vs equities.",
-        "Rising = relative commodity strength."
-    ),
-    "GDX/SPY": (
-        "Gold miners vs the broader market.",
-        "Rising = gold miner relative strength."
-    ),
-    "GLD/TLT": (
-        "Gold vs long-term Treasury bonds.",
-        "Rising = preference for gold relative to bonds."
-    ),
-    "USO/SPY": (
-        "Oil vs equities.",
-        "Rising may indicate stronger oil prices or inflation pressure."
-    ),
-    "TIP/TLT": (
-        "Inflation-protected vs long-term nominal Treasuries.",
-        "Sensitive to inflation expectations and duration differences."
-    ),
-    "CPER/GLD": (
-        "Copper vs gold.",
-        "Rising may indicate improving growth expectations."
-    ),
-    "GLD/USO": (
-        "Gold vs oil.",
-        "Rising may indicate defensive commodity positioning."
-    ),
-    "GLD/XME": (
-        "Gold vs metals and mining equities.",
-        "Rising may indicate preference for defensive assets."
-    ),
-    "EEM/SPY": (
-        "Emerging markets vs U.S. equities.",
-        "Rising = emerging market leadership."
-    ),
-    "VEA/SPY": (
-        "Developed international markets vs U.S.",
-        "Rising = international market leadership."
-    ),
-    "FXI/SPY": (
-        "Chinese equities vs U.S. equities.",
-        "Rising = Chinese equity relative strength."
-    ),
-    "ETHA/IBIT": (
-        "Ethereum vs Bitcoin.",
-        "Rising = Ethereum leadership."
-    ),
-    "ETHA/GSOL": (
-        "Ethereum vs Solana exposure.",
-        "Rising = Ethereum relative strength."
-    ),
-    "BMNR/ETHA": (
-        "BMNR equity vs Ethereum exposure.",
-        "Rising = BMNR equity outperformance."
-    ),
-    "MSTR/IBIT": (
-        "Strategy equity vs Bitcoin exposure.",
-        "Rising = equity outperformance relative to Bitcoin."
-    ),
+    "SPY/RSP": "Rising = narrow mega-cap leadership. Falling = broader participation.",
+    "QQQ/IWM": "Rising = large-cap growth leadership. Falling = small-cap relative strength.",
+    "DIA/IWM": "Rising = established blue-chip leadership.",
+    "MGK/SPY": "Rising = mega-cap growth outperforming the market.",
+    "SPY/TLT": "Rising may indicate stronger equity risk appetite.",
+    "HYG/IEF": "Falling may indicate increasing credit stress.",
+    "XLY/XLP": "Rising may indicate stronger consumer confidence.",
+    "IWM/SHY": "Rising may indicate increasing risk appetite.",
+    "SPHB/SPLV": "Rising = aggressive stocks outperforming defensive stocks.",
+    "XLF/SPY": "Rising = financial sector leadership.",
+    "XLV/SPY": "Rising may indicate defensive rotation.",
+    "XLE/SPY": "Rising = energy sector leadership.",
+    "XLK/SPY": "Rising = technology sector leadership.",
+    "XLI/SPY": "Rising = industrial sector leadership.",
+    "RSPD/RSPS": "Rising = broad consumer discretionary leadership.",
+    "DBC/SPY": "Rising = commodities outperforming equities.",
+    "GDX/SPY": "Rising = gold miner relative strength.",
+    "GLD/TLT": "Rising = gold outperforming long-term bonds.",
+    "USO/SPY": "Rising may indicate stronger oil prices.",
+    "TIP/TLT": "Sensitive to inflation expectations and duration differences.",
+    "CPER/GLD": "Rising may indicate stronger economic growth expectations.",
+    "GLD/USO": "Rising may indicate defensive commodity positioning.",
+    "GLD/XME": "Rising may indicate defensive positioning.",
+    "EEM/SPY": "Rising = emerging market leadership.",
+    "VEA/SPY": "Rising = international market leadership.",
+    "FXI/SPY": "Rising = Chinese equity leadership.",
+    "ETHA/IBIT": "Rising = Ethereum outperforming Bitcoin.",
+    "ETHA/GSOL": "Rising = Ethereum outperforming Solana.",
+    "BMNR/ETHA": "Rising = BMNR outperforming Ethereum exposure.",
+    "MSTR/IBIT": "Rising = MSTR outperforming Bitcoin exposure.",
 }
 
 
 # ============================================================
-# DATE HELPERS
+# GENERAL HELPERS
 # ============================================================
 
-def period_start_date(preset):
+def start_date(period):
 
-    today = dt.today()
+    today = datetime.today()
 
-    if preset == "QTD":
-        month = ((today.month - 1) // 3) * 3 + 1
-        return dt(today.year, month, 1).strftime("%Y-%m-%d")
-
-    if preset == "YTD":
+    if period == "YTD":
         return f"{today.year}-01-01"
 
-    periods = {
+    if period == "QTD":
+        month = ((today.month - 1) // 3) * 3 + 1
+        return datetime(today.year, month, 1).strftime("%Y-%m-%d")
+
+    days = {
         "3M": 92,
         "6M": 183,
         "1Y": 365,
@@ -217,27 +125,33 @@ def period_start_date(preset):
         "10Y": 3650
     }
 
-    if preset in periods:
+    if period in days:
         return (
-            today - timedelta(days=periods[preset])
+            today - timedelta(days=days[period])
         ).strftime("%Y-%m-%d")
 
-    return "2000-01-01"
+    return "1900-01-01"
 
 
-# ============================================================
-# FORMATTING HELPERS
-# ============================================================
-
-def fmt(value, style="number"):
+def number(value, default=np.nan):
 
     try:
         value = float(value)
 
-        if not np.isfinite(value):
-            return "N/A"
+        if np.isfinite(value):
+            return value
 
     except (TypeError, ValueError):
+        pass
+
+    return default
+
+
+def fmt(value, style="number"):
+
+    value = number(value)
+
+    if pd.isna(value):
         return "N/A"
 
     if style == "percent":
@@ -261,50 +175,48 @@ def fmt(value, style="number"):
     return f"{value:,.2f}"
 
 
+def divide(a, b):
+
+    a = number(a)
+    b = number(b)
+
+    if pd.isna(a) or pd.isna(b) or b <= 0:
+        return np.nan
+
+    return a / b
+
+
+def safe_divide(a, b):
+
+    return (
+        a / b.where(b > 0)
+    ).replace([np.inf, -np.inf], np.nan)
+
+
+def growth_rate(series):
+
+    previous = series.shift(1)
+
+    return (
+        (series - previous) /
+        previous.where(previous > 0)
+    ) * 100
+
+
 def metric_grid(metrics, columns=4):
 
-    for start in range(0, len(metrics), columns):
+    for i in range(0, len(metrics), columns):
 
         cols = st.columns(columns)
 
-        for col, item in zip(
-            cols, metrics[start:start + columns]
-        ):
+        for col, item in zip(cols, metrics[i:i + columns]):
 
             label, value, style = item
 
             col.metric(label, fmt(value, style))
 
 
-def safe_divide(a, b):
-
-    return a.div(
-        b.where(b > 0)
-    ).replace([np.inf, -np.inf], np.nan)
-
-
-def growth_rate(series):
-
-    prior = series.shift(1)
-
-    return (
-        (series - prior) /
-        prior.where(prior > 0)
-    ) * 100
-
-
-def scale_money(series, scale):
-
-    if scale == "Billions":
-        return series / 1e9
-
-    if scale == "Millions":
-        return series / 1e6
-
-    return series
-
-
-def csv_button(df, filename, key):
+def download_csv(df, filename, key):
 
     st.download_button(
         "Download CSV",
@@ -316,19 +228,19 @@ def csv_button(df, filename, key):
 
 
 # ============================================================
-# DATA DOWNLOAD HELPERS
+# YAHOO FINANCE DATA
 # ============================================================
 
 @st.cache_data(ttl=1800)
-def fetch_prices(symbols, start_date, adjusted=False):
+def fetch_prices(tickers, start, adjusted=False):
 
     try:
 
         raw = yf.download(
-            symbols,
-            start=start_date,
-            progress=False,
-            auto_adjust=adjusted
+            list(tickers),
+            start=start,
+            auto_adjust=adjusted,
+            progress=False
         )
 
         if raw is None or raw.empty:
@@ -336,22 +248,12 @@ def fetch_prices(symbols, start_date, adjusted=False):
 
         if isinstance(raw.columns, pd.MultiIndex):
 
-            if "Close" not in raw.columns.get_level_values(0):
-                return pd.DataFrame()
-
             close = raw["Close"].copy()
 
         else:
 
             close = raw[["Close"]].copy()
-
-            symbol = (
-                symbols[0]
-                if isinstance(symbols, list)
-                else symbols
-            )
-
-            close.columns = [symbol]
+            close.columns = [tickers[0]]
 
         if isinstance(close, pd.Series):
             close = close.to_frame()
@@ -366,11 +268,12 @@ def fetch_prices(symbols, start_date, adjusted=False):
         ).dropna(how="all")
 
     except Exception:
+
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
-def fetch_ticker_info(ticker):
+def fetch_info(ticker):
 
     try:
         return yf.Ticker(ticker).info or {}
@@ -386,87 +289,68 @@ def fetch_statements(ticker, frequency="Annual"):
 
     quarterly = frequency == "Quarterly"
 
-    def clean(frame):
-
-        if frame is None or frame.empty:
-            return pd.DataFrame()
-
-        frame = frame.copy()
-
-        frame.index = frame.index.map(str)
-
-        frame.columns = pd.to_datetime(
-            frame.columns,
-            errors="coerce"
-        )
-
-        frame = frame.loc[
-            :, frame.columns.notna()
-        ]
-
-        frame = frame.loc[
-            :, ~frame.columns.duplicated()
-        ]
-
-        frame = frame.sort_index(axis=1)
-
-        return frame.apply(
-            pd.to_numeric,
-            errors="coerce"
-        )
-
-    statements = {}
-
     attributes = {
-        "income": (
+        "Income Statement": (
             "quarterly_income_stmt"
             if quarterly else "income_stmt"
         ),
-        "balance": (
+        "Balance Sheet": (
             "quarterly_balance_sheet"
             if quarterly else "balance_sheet"
         ),
-        "cash": (
+        "Cash Flow": (
             "quarterly_cashflow"
             if quarterly else "cashflow"
         )
     }
 
+    result = {}
+
     for name, attribute in attributes.items():
 
         try:
 
-            statements[name] = clean(
-                getattr(company, attribute)
+            df = getattr(company, attribute).copy()
+
+            df.columns = pd.to_datetime(
+                df.columns,
+                errors="coerce"
+            )
+
+            df = df.loc[:, df.columns.notna()]
+
+            df = df.loc[:, ~df.columns.duplicated()]
+
+            df = df.sort_index(axis=1)
+
+            result[name] = df.apply(
+                pd.to_numeric,
+                errors="coerce"
             )
 
         except Exception:
 
-            statements[name] = pd.DataFrame()
+            result[name] = pd.DataFrame()
 
-    return statements
+    return result
 
-
-# ============================================================
-# FINANCIAL STATEMENT HELPERS
-# ============================================================
 
 def normalize_label(label):
 
     return "".join(
-        char for char in str(label).lower()
-        if char.isalnum()
+        c for c in str(label).lower()
+        if c.isalnum()
     )
 
 
-def statement_row(frame, *names):
+def statement_row(df, *names):
 
-    if frame is None or frame.empty:
+    if df is None or df.empty:
         return pd.Series(dtype=float)
 
     lookup = {
         normalize_label(label): label
-        for label in frame.index
+        for label in df.index
     }
 
     for name in names:
@@ -475,89 +359,64 @@ def statement_row(frame, *names):
 
         if key in lookup:
 
-            series = frame.loc[lookup[key]]
+            series = df.loc[lookup[key]]
 
             if isinstance(series, pd.DataFrame):
                 series = series.iloc[0]
 
-            series = pd.to_numeric(
+            return pd.to_numeric(
                 series,
                 errors="coerce"
-            )
-
-            return series.sort_index()
+            ).sort_index()
 
     return pd.Series(dtype=float)
 
 
-def get_financial_history(statements, annual=True):
+# ============================================================
+# FINANCIAL HISTORY
+# ============================================================
 
-    income = statements["income"]
-    balance = statements["balance"]
-    cash = statements["cash"]
+def financial_history(statements, annual=True):
 
-    dates = income.columns.union(
-        balance.columns
-    ).union(cash.columns).sort_values()
+    income = statements["Income Statement"]
+    balance = statements["Balance Sheet"]
+    cash = statements["Cash Flow"]
+
+    dates = income.columns
+
+    if len(dates) == 0:
+        dates = balance.columns.union(cash.columns)
+
+    dates = dates.sort_values()
 
     history = pd.DataFrame(index=dates)
 
     income_fields = {
-        "Revenue": (
-            "Total Revenue",
-            "Revenue"
-        ),
-        "Gross Profit": (
-            "Gross Profit",
-        ),
-        "Operating Income": (
-            "Operating Income",
-        ),
-        "Net Income": (
-            "Net Income",
-        ),
-        "Diluted EPS": (
-            "Diluted EPS",
-        ),
-        "EBITDA": (
-            "EBITDA",
-        ),
-        "Pretax Income": (
-            "Pretax Income",
-        ),
-        "Tax Provision": (
-            "Tax Provision",
-        ),
-        "Interest Expense": (
-            "Interest Expense",
-        )
+        "Revenue": ("Total Revenue", "Revenue"),
+        "Gross Profit": ("Gross Profit",),
+        "Operating Income": ("Operating Income",),
+        "Net Income": ("Net Income",),
+        "Diluted EPS": ("Diluted EPS",),
+        "EBITDA": ("EBITDA",),
+        "Pretax Income": ("Pretax Income",),
+        "Tax Provision": ("Tax Provision",),
+        "Interest Expense": ("Interest Expense",),
     }
 
     balance_fields = {
-        "Total Assets": (
-            "Total Assets",
-        ),
-        "Equity": (
-            "Stockholders Equity",
-            "Total Stockholder Equity"
-        ),
-        "Total Debt": (
-            "Total Debt",
-        ),
-        "Cash": (
-            "Cash And Cash Equivalents",
-        ),
-        "Invested Capital": (
-            "Invested Capital",
-        ),
-        "Current Assets": (
-            "Current Assets",
-            "Total Current Assets"
-        ),
+        "Total Assets": ("Total Assets",),
+        "Equity": ("Stockholders Equity", "Total Stockholder Equity"),
+        "Total Debt": ("Total Debt",),
+        "Cash": ("Cash And Cash Equivalents",),
+        "Invested Capital": ("Invested Capital",),
+        "Current Assets": ("Current Assets", "Total Current Assets"),
         "Current Liabilities": (
             "Current Liabilities",
             "Total Current Liabilities"
-        )
+        ),
+        "Inventory": ("Inventory",),
+        "Minority Interest": ("Minority Interest",),
+        "Preferred Stock": ("Preferred Stock",),
     }
 
     cash_fields = {
@@ -565,13 +424,16 @@ def get_financial_history(statements, annual=True):
             "Operating Cash Flow",
             "Total Cash From Operating Activities"
         ),
-        "Free Cash Flow": (
-            "Free Cash Flow",
+        "Free Cash Flow": ("Free Cash Flow",),
+        "CAPEX": ("Capital Expenditure", "Capital Expenditures"),
+        "Depreciation & Amortization": (
+            "Depreciation And Amortization",
+            "Depreciation Amortization Depletion",
+            "Depreciation"
         ),
-        "CAPEX": (
-            "Capital Expenditure",
-            "Capital Expenditures"
-        )
+        "Change in Working Capital": (
+            "Change In Working Capital",
+        ),
     }
 
     for fields, frame in [
@@ -590,43 +452,53 @@ def get_financial_history(statements, annual=True):
 
     history["Free Cash Flow"] = (
         history["Free Cash Flow"].combine_first(
-            history["Operating Cash Flow"]
-            - history["CAPEX"]
+            history["Operating Cash Flow"] -
+            history["CAPEX"]
         )
     )
 
+    # Yahoo cash flow working capital changes use
+    # cash flow signs. Convert to investment signs.
+
+    history["Working Capital Investment"] = (
+        -history["Change in Working Capital"]
+    )
+
+    growth_period = 1 if annual else 4
+
     for field in [
         "Revenue",
-        "Net Income",
         "Operating Income",
+        "Net Income",
         "Diluted EPS",
-        "Free Cash Flow"
+        "Free Cash Flow",
+        "CAPEX"
     ]:
 
-        history[field + " Growth (%)"] = growth_rate(
-            history[field]
+        prior = history[field].shift(growth_period)
+
+        history[field + " Growth (%)"] = (
+            (history[field] - prior) /
+            prior.where(prior > 0)
+        ) * 100
+
+        date_difference = (
+            history.index.to_series()
+            .diff(growth_period)
+            .dt.days
         )
 
-        if annual:
-
-            consecutive = (
-                history.index.to_series()
-                .diff()
-                .dt.days
-                .between(300, 430)
-            )
-
-            history[field + " Growth (%)"] = (
-                history[field + " Growth (%)"]
-                .where(consecutive)
-            )
+        history[field + " Growth (%)"] = (
+            history[field + " Growth (%)"]
+            .where(date_difference.between(300, 430))
+        )
 
     for field, label in [
         ("Gross Profit", "Gross Margin (%)"),
         ("Operating Income", "Operating Margin (%)"),
         ("Net Income", "Net Margin (%)"),
         ("Free Cash Flow", "FCF Margin (%)"),
-        ("EBITDA", "EBITDA Margin (%)")
+        ("EBITDA", "EBITDA Margin (%)"),
     ]:
 
         history[label] = safe_divide(
@@ -644,6 +516,12 @@ def get_financial_history(statements, annual=True):
         history["Current Liabilities"]
     )
 
+    history["Quick Ratio"] = safe_divide(
+        history["Current Assets"] -
+        history["Inventory"],
+        history["Current Liabilities"]
+    )
+
     history["Interest Coverage"] = safe_divide(
         history["Operating Income"],
         history["Interest Expense"].abs()
@@ -652,6 +530,13 @@ def get_financial_history(statements, annual=True):
     history["Debt / EBITDA"] = safe_divide(
         history["Total Debt"],
         history["EBITDA"]
+    )
+
+    history["Effective Tax Rate (%)"] = (
+        safe_divide(
+            history["Tax Provision"],
+            history["Pretax Income"]
+        ) * 100
     )
 
     if annual:
@@ -663,40 +548,38 @@ def get_financial_history(statements, annual=True):
             .between(300, 430)
         )
 
-        avg_equity = (
-            history["Equity"]
-            + history["Equity"].shift(1)
+        average_equity = (
+            history["Equity"] +
+            history["Equity"].shift(1)
         ) / 2
 
-        avg_equity = avg_equity.where(
-            consecutive
-            & (history["Equity"] > 0)
-            & (history["Equity"].shift(1) > 0)
+        average_equity = average_equity.where(
+            consecutive &
+            (history["Equity"] > 0) &
+            (history["Equity"].shift(1) > 0)
         )
 
-        avg_assets = (
-            history["Total Assets"]
-            + history["Total Assets"].shift(1)
+        average_assets = (
+            history["Total Assets"] +
+            history["Total Assets"].shift(1)
         ) / 2
 
-        avg_assets = avg_assets.where(consecutive)
+        average_assets = average_assets.where(consecutive)
 
         history["ROE (%)"] = safe_divide(
             history["Net Income"],
-            avg_equity
+            average_equity
         ) * 100
 
         history["ROA (%)"] = safe_divide(
             history["Net Income"],
-            avg_assets
+            average_assets
         ) * 100
 
-        capital = history[
-            "Invested Capital"
-        ].combine_first(
-            history["Total Debt"]
-            + history["Equity"]
-            - history["Cash"]
+        capital = history["Invested Capital"].combine_first(
+            history["Total Debt"] +
+            history["Equity"] -
+            history["Cash"]
         )
 
         average_capital = (
@@ -704,23 +587,19 @@ def get_financial_history(statements, annual=True):
         ) / 2
 
         average_capital = average_capital.where(
-            consecutive
-            & (capital > 0)
-            & (capital.shift(1) > 0)
+            consecutive &
+            (capital > 0) &
+            (capital.shift(1) > 0)
         )
 
-        tax_rate = safe_divide(
-            history["Tax Provision"],
-            history["Pretax Income"]
+        tax = (
+            history["Effective Tax Rate (%)"] / 100
         )
 
-        tax_rate = tax_rate.where(
-            tax_rate.between(0, 1)
-        )
+        tax = tax.where(tax.between(0, 1))
 
         nopat = (
-            history["Operating Income"]
-            * (1 - tax_rate)
+            history["Operating Income"] * (1 - tax)
         )
 
         history["ROIC (%)"] = safe_divide(
@@ -732,6 +611,46 @@ def get_financial_history(statements, annual=True):
         [np.inf, -np.inf],
         np.nan
     )
+
+
+def trailing_financials(history):
+
+    if len(history) < 4:
+        return pd.Series(dtype=float)
+
+    dates = history.index[-4:]
+
+    intervals = dates.to_series().diff().dropna().dt.days
+
+    if not intervals.between(60, 120).all():
+        return pd.Series(dtype=float)
+
+    recent = history.tail(4)
+
+    result = recent.iloc[-1].copy()
+
+    flow_fields = [
+        "Revenue",
+        "Gross Profit",
+        "Operating Income",
+        "Net Income",
+        "Diluted EPS",
+        "EBITDA",
+        "Pretax Income",
+        "Tax Provision",
+        "Interest Expense",
+        "Operating Cash Flow",
+        "Free Cash Flow",
+        "CAPEX",
+        "Depreciation & Amortization",
+        "Working Capital Investment"
+    ]
+
+    for field in flow_fields:
+
+        result[field] = recent[field].sum(min_count=4)
+
+    return result
 
 
 # ============================================================
@@ -754,25 +673,21 @@ def plot_chart(
     ).dropna(how="all")
 
     if data.empty:
-        st.info("No data available.")
+
+        st.info("No chart data available.")
         return
 
-    fig, ax = plt.subplots(figsize=(12, 4.8))
+    fig, ax = plt.subplots(figsize=(12, 4.5))
 
     if chart_type == "Bar":
 
-        plot_data = data.copy()
+        display = data.copy()
 
-        if isinstance(plot_data.index, pd.DatetimeIndex):
+        if isinstance(display.index, pd.DatetimeIndex):
 
-            plot_data.index = (
-                plot_data.index.strftime("%Y-%m-%d")
-            )
+            display.index = display.index.strftime("%Y-%m-%d")
 
-        plot_data.plot.bar(
-            ax=ax,
-            rot=30
-        )
+        display.plot.bar(ax=ax, rot=25)
 
         if labels:
 
@@ -802,27 +717,18 @@ def plot_chart(
 
                     ax.annotate(
                         f"{y:,.2f}",
-                        xy=(x, y),
+                        (x, y),
                         xytext=(0, 6),
                         textcoords="offset points",
                         ha="center",
                         fontsize=8
                     )
 
-    ax.set_title(
-        title,
-        fontsize=13,
-        fontweight="bold"
-    )
+    ax.set_title(title, fontweight="bold")
 
-    ax.set_xlabel("Date")
     ax.set_ylabel(ylabel)
 
-    ax.grid(
-        True,
-        linestyle="--",
-        alpha=0.3
-    )
+    ax.grid(True, linestyle="--", alpha=0.3)
 
     if len(data.columns) > 1:
         ax.legend()
@@ -834,36 +740,45 @@ def plot_chart(
     plt.close(fig)
 
 
-def financial_table(history, columns):
+def financial_table(history, fields):
 
-    selected = history[
-        [c for c in columns if c in history.columns]
-    ].copy()
+    fields = [f for f in fields if f in history.columns]
 
-    selected.index = selected.index.strftime("%Y-%m-%d")
+    if history.empty or not fields:
 
-    table = selected.T.astype(object)
+        st.info("Financial data unavailable.")
+        return
 
-    for label in table.index:
+    table = history[fields].T.astype(object)
 
-        if "(%)" in label:
+    table.columns = [
+        d.strftime("%Y-%m-%d")
+        for d in table.columns
+    ]
+
+    multiples = [
+        "Debt / Equity",
+        "Debt / EBITDA",
+        "Current Ratio",
+        "Quick Ratio",
+        "Interest Coverage"
+    ]
+
+    for field in table.index:
+
+        if "(%)" in field:
             style = "percent"
 
-        elif label in [
-            "Debt / Equity",
-            "Debt / EBITDA",
-            "Current Ratio",
-            "Interest Coverage"
-        ]:
+        elif field in multiples:
             style = "multiple"
 
-        elif "EPS" in label:
+        elif "EPS" in field:
             style = "number"
 
         else:
             style = "money"
 
-        table.loc[label] = table.loc[label].map(
+        table.loc[field] = table.loc[field].map(
             lambda x: fmt(x, style)
         )
 
@@ -877,162 +792,121 @@ def financial_table(history, columns):
 # PAGE 1: RATIO DASHBOARD
 # ============================================================
 
-def render_ratio_dashboard():
+def render_ratios():
 
     st.subheader("📊 Ratio Dashboard")
 
-    st.info(
-        "Compare two securities using relative strength ratios."
-    )
-
     st.sidebar.markdown("---")
+
     st.sidebar.subheader("Ratio Controls")
 
-    category = st.sidebar.selectbox(
+    group = st.sidebar.selectbox(
         "Category",
         list(RATIO_GROUPS.keys())
     )
 
     preset = st.sidebar.radio(
-        "Preset Ratios",
-        list(RATIO_GROUPS[category].keys())
+        "Preset Ratio",
+        list(RATIO_GROUPS[group].keys())
     )
 
-    symbol_a, symbol_b = RATIO_GROUPS[category][preset]
+    a, b = RATIO_GROUPS[group][preset]
 
-    date_range = st.sidebar.radio(
+    if st.sidebar.checkbox("Use Custom Tickers"):
+
+        a = st.sidebar.text_input(
+            "Ticker A", a
+        ).upper().strip()
+
+        b = st.sidebar.text_input(
+            "Ticker B", b
+        ).upper().strip()
+
+    period = st.sidebar.radio(
         "Date Range",
         ["YTD", "1Y", "3Y", "5Y", "Max"],
-        index=1,
-        horizontal=True
+        index=1
     )
 
-    custom = st.sidebar.checkbox(
-        "Use custom tickers"
-    )
+    with st.sidebar.expander("Chart Options"):
 
-    if custom:
-
-        symbol_a = st.sidebar.text_input(
-            "First Ticker",
-            value="SPY"
-        ).upper().strip()
-
-        symbol_b = st.sidebar.text_input(
-            "Second Ticker",
-            value="TLT"
-        ).upper().strip()
-
-    with st.sidebar.expander("Advanced Chart Options"):
-
-        show_ma = st.checkbox(
+        moving_averages = st.checkbox(
             "Show Moving Averages",
             value=True
         )
 
-        log_scale = st.checkbox(
-            "Log Scale",
-            value=False
-        )
+        log_scale = st.checkbox("Log Scale")
 
-        show_extremes = st.checkbox(
-            "Label High, Low and Latest",
-            value=False
-        )
+        extremes = st.checkbox("Show High / Low / Latest")
 
-    ratio_name = f"{symbol_a}/{symbol_b}"
+    st.markdown(f"### {a} / {b}")
 
-    st.markdown(f"### {ratio_name}")
-
-    description, commentary = RATIO_INFO.get(
-        ratio_name,
-        (
-            "Custom relative strength ratio.",
-            "Rising means the first asset is outperforming the second."
+    st.write(
+        RATIO_INFO.get(
+            f"{a}/{b}",
+            "Rising means the numerator is outperforming the denominator."
         )
     )
 
-    st.write("**Description:**", description)
+    if not a or not b or a == b:
 
-    st.write("**Interpretation:**", commentary)
-
-    start = period_start_date(date_range)
-
-    st.caption(f"Start date: {start}")
-
-    if not symbol_a or not symbol_b:
-        st.warning("Enter two ticker symbols.")
+        st.warning("Enter two different ticker symbols.")
         return
 
-    if symbol_a == symbol_b:
-        st.warning("Please enter two different symbols.")
-        return
-
-    selection = (
-        symbol_a,
-        symbol_b,
-        date_range
-    )
+    selection = (a, b, period)
 
     if st.button("Plot Ratio", type="primary"):
 
-        with st.spinner("Downloading market data..."):
+        requested_start = pd.Timestamp(start_date(period))
+
+        download_start = max(
+            requested_start - pd.Timedelta(days=400),
+            pd.Timestamp("1900-01-01")
+        )
+
+        with st.spinner("Downloading data..."):
 
             prices = fetch_prices(
-                [symbol_a, symbol_b],
-                start
+                (a, b),
+                download_start.strftime("%Y-%m-%d")
             )
 
-        if not all(
-            s in prices.columns
-            for s in [symbol_a, symbol_b]
-        ):
+        if a not in prices or b not in prices:
 
-            st.error("Unable to download both tickers.")
+            st.error("Unable to download both securities.")
             return
 
-        prices = prices[
-            [symbol_a, symbol_b]
-        ].dropna()
+        data = prices[[a, b]].dropna()
 
-        prices["Ratio"] = (
-            prices[symbol_a] /
-            prices[symbol_b].replace(0, np.nan)
+        data["Ratio"] = (
+            data[a] / data[b].replace(0, np.nan)
         )
 
-        prices["Ratio"] = prices[
-            "Ratio"
-        ].replace([np.inf, -np.inf], np.nan)
+        data["50 DMA"] = data["Ratio"].rolling(50).mean()
 
-        prices["50 DMA"] = (
-            prices["Ratio"].rolling(50).mean()
-        )
+        data["200 DMA"] = data["Ratio"].rolling(200).mean()
 
-        prices["200 DMA"] = (
-            prices["Ratio"].rolling(200).mean()
-        )
+        data = data.loc[requested_start:]
 
-        st.session_state["ratio_result"] = prices
+        st.session_state["ratio_data"] = data
 
         st.session_state["ratio_selection"] = selection
 
     if st.session_state.get("ratio_selection") != selection:
 
-        st.info("Click Plot Ratio to update the chart.")
+        st.info("Click Plot Ratio to display the chart.")
         return
 
-    data = st.session_state.get(
-        "ratio_result",
-        pd.DataFrame()
-    )
+    data = st.session_state["ratio_data"]
 
     if data.empty:
+
+        st.warning("No data available.")
         return
 
     ratio = data["Ratio"].dropna()
 
     if ratio.empty:
-        st.warning("No valid ratio data.")
         return
 
     def change(series):
@@ -1040,54 +914,48 @@ def render_ratio_dashboard():
         series = series.dropna()
 
         if len(series) < 2 or series.iloc[-2] == 0:
-            return "N/A"
+            return None
 
         return f"{(series.iloc[-1] / series.iloc[-2] - 1) * 100:+.2f}%"
-
-    high = ratio.max()
-
-    low = ratio.min()
-
-    latest = ratio.iloc[-1]
-
-    drawdown = (
-        (latest / high - 1) * 100
-        if high != 0 else np.nan
-    )
 
     cols = st.columns(6)
 
     cols[0].metric(
-        f"{symbol_a} Price",
-        fmt(data[symbol_a].iloc[-1]),
-        change(data[symbol_a])
+        f"{a} Price",
+        fmt(data[a].iloc[-1]),
+        change(data[a])
     )
 
     cols[1].metric(
-        f"{symbol_b} Price",
-        fmt(data[symbol_b].iloc[-1]),
-        change(data[symbol_b])
+        f"{b} Price",
+        fmt(data[b].iloc[-1]),
+        change(data[b])
     )
 
     cols[2].metric(
         "Current Ratio",
-        f"{latest:.3f}",
+        f"{ratio.iloc[-1]:.3f}",
         change(ratio)
     )
 
     cols[3].metric(
-        "Period High",
-        f"{high:.3f}"
+        "High",
+        f"{ratio.max():.3f}",
+        ratio.idxmax().strftime("%Y-%m-%d")
     )
 
     cols[4].metric(
-        "Period Low",
-        f"{low:.3f}"
+        "Low",
+        f"{ratio.min():.3f}",
+        ratio.idxmin().strftime("%Y-%m-%d")
     )
 
     cols[5].metric(
         "Drawdown",
-        fmt(drawdown, "percent")
+        fmt(
+            (ratio.iloc[-1] / ratio.max() - 1) * 100,
+            "percent"
+        )
     )
 
     fig, ax = plt.subplots(figsize=(12, 5))
@@ -1095,27 +963,27 @@ def render_ratio_dashboard():
     ax.plot(
         ratio.index,
         ratio,
-        label=ratio_name,
+        label=f"{a}/{b}",
         linewidth=2
     )
 
-    if show_ma:
+    if moving_averages:
 
-        for name in ["50 DMA", "200 DMA"]:
+        for column in ["50 DMA", "200 DMA"]:
 
             ax.plot(
                 data.index,
-                data[name],
+                data[column],
                 linestyle="--",
-                label=name
+                label=column
             )
 
-    if show_extremes:
+    if extremes:
 
         points = [
-            (ratio.idxmax(), high, "High"),
-            (ratio.idxmin(), low, "Low"),
-            (ratio.index[-1], latest, "Latest")
+            (ratio.idxmax(), ratio.max(), "High"),
+            (ratio.idxmin(), ratio.min(), "Low"),
+            (ratio.index[-1], ratio.iloc[-1], "Latest")
         ]
 
         for date, value, label in points:
@@ -1132,10 +1000,10 @@ def render_ratio_dashboard():
     if log_scale:
         ax.set_yscale("log")
 
-    ax.set_title(ratio_name)
-    ax.set_ylabel("Ratio")
-    ax.set_xlabel("Date")
+    ax.set_title(f"{a}/{b} Relative Strength")
+
     ax.legend()
+
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -1144,9 +1012,9 @@ def render_ratio_dashboard():
 
     plt.close(fig)
 
-    csv_button(
+    download_csv(
         data,
-        f"{symbol_a}_{symbol_b}_ratio.csv",
+        f"{a}_{b}_ratio.csv",
         "ratio_csv"
     )
 
@@ -1160,37 +1028,24 @@ def render_performance():
     st.subheader("📈 Performance")
 
     st.info(
-        "Compare up to 20 securities. "
-        "Performance is indexed to 100 at the beginning "
-        "of the common available period."
+        "Compare up to 20 securities using normalized performance."
     )
 
-    date_range = st.radio(
+    text = st.text_input(
+        "Enter Tickers Separated by Commas",
+        "SPY, QQQ, IWM, TLT"
+    )
+
+    tickers = tuple(dict.fromkeys(
+        t.strip().upper()
+        for t in text.split(",")
+        if t.strip()
+    ))[:20]
+
+    period = st.radio(
         "Performance Period",
         ["QTD", "YTD", "3M", "6M", "1Y", "3Y", "5Y", "Max"],
         horizontal=True
-    )
-
-    raw_tickers = st.text_input(
-        "Enter up to 20 tickers, separated by commas",
-        value="SPY, QQQ, IWM, TLT"
-    )
-
-    tickers = list(dict.fromkeys(
-        t.strip().upper()
-        for t in raw_tickers.split(",")
-        if t.strip()
-    ))
-
-    if len(tickers) > 20:
-
-        st.warning("Only the first 20 tickers will be used.")
-
-        tickers = tickers[:20]
-
-    include_names = st.checkbox(
-        "Fetch Company Names",
-        value=False
     )
 
     adjusted = st.checkbox(
@@ -1198,12 +1053,9 @@ def render_performance():
         value=True
     )
 
-    selection = (
-        tuple(tickers),
-        date_range,
-        include_names,
-        adjusted
-    )
+    names = st.checkbox("Include Company Names")
+
+    selection = (tickers, period, adjusted)
 
     if st.button("Plot Performance", type="primary"):
 
@@ -1212,70 +1064,43 @@ def render_performance():
             st.warning("Enter at least one ticker.")
             return
 
-        with st.spinner("Downloading prices..."):
+        with st.spinner("Downloading data..."):
 
-            prices = fetch_prices(
+            data = fetch_prices(
                 tickers,
-                period_start_date(date_range),
-                adjusted=adjusted
+                start_date(period),
+                adjusted
             )
 
-        if prices.empty:
-
-            st.error("No price data returned.")
-            return
-
-        missing = [
-            t for t in tickers
-            if t not in prices.columns
-        ]
+        missing = [t for t in tickers if t not in data]
 
         if missing:
 
             st.warning(
-                "Unavailable tickers: "
-                + ", ".join(missing)
+                "Unavailable tickers: " + ", ".join(missing)
             )
 
-        prices = prices.dropna(how="any")
+        data = data.dropna(how="any")
 
-        if prices.empty:
+        if data.empty:
 
-            st.error(
-                "No common dates are available."
-            )
+            st.error("No common price history available.")
             return
 
-        prices = prices.loc[
-            :, prices.iloc[0] != 0
-        ]
+        data = data.loc[:, data.iloc[0] != 0]
 
-        indexed = (
-            prices / prices.iloc[0]
-        ) * 100
+        indexed = data / data.iloc[0] * 100
 
-        st.session_state[
-            "performance_result"
-        ] = indexed
+        st.session_state["performance"] = indexed
 
-        st.session_state[
-            "performance_selection"
-        ] = selection
+        st.session_state["performance_selection"] = selection
 
-    if st.session_state.get(
-        "performance_selection"
-    ) != selection:
+    if st.session_state.get("performance_selection") != selection:
 
-        st.info("Click Plot Performance to display results.")
+        st.info("Click Plot Performance.")
         return
 
-    indexed = st.session_state.get(
-        "performance_result",
-        pd.DataFrame()
-    )
-
-    if indexed.empty:
-        return
+    indexed = st.session_state["performance"]
 
     returns = (
         indexed.iloc[-1] - 100
@@ -1286,17 +1111,15 @@ def render_performance():
         "Return (%)": returns.values
     })
 
-    if include_names:
+    if names:
 
         summary["Company"] = [
-            fetch_ticker_info(ticker).get(
-                "shortName", ticker
-            )
-            for ticker in summary["Ticker"]
+            fetch_info(t).get("shortName", t)
+            for t in summary["Ticker"]
         ]
 
     st.caption(
-        f"Actual period: "
+        f"Actual comparison period: "
         f"{indexed.index[0].date()} through "
         f"{indexed.index[-1].date()}"
     )
@@ -1308,55 +1131,23 @@ def render_performance():
         use_container_width=True
     )
 
-    fig, ax = plt.subplots(figsize=(14, 7))
-
-    for ticker in returns.index:
-
-        line, = ax.plot(
-            indexed.index,
-            indexed[ticker],
-            linewidth=2,
-            label=f"{ticker}: {returns[ticker]:+.1f}%"
-        )
-
-        ax.annotate(
-            f"{ticker} ({returns[ticker]:+.1f}%)",
-            (
-                indexed.index[-1],
-                indexed[ticker].iloc[-1]
-            ),
-            xytext=(6, 0),
-            textcoords="offset points",
-            fontsize=8,
-            color=line.get_color()
-        )
-
-    ax.axhline(
-        100,
-        linestyle="--",
-        color="gray"
+    plot_chart(
+        indexed,
+        "Performance Comparison",
+        "Indexed to 100"
     )
 
-    ax.set_title(
-        f"Performance Comparison - {date_range}"
+    plot_chart(
+        returns.rename("Total Return (%)"),
+        "Period Returns",
+        "Percent",
+        "Bar",
+        True
     )
 
-    ax.set_ylabel("Indexed Performance")
-    ax.set_xlabel("Date")
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-
-    plt.tight_layout()
-
-    st.pyplot(fig)
-
-    plt.close(fig)
-
-    csv_button(
-        indexed.join(
-            (indexed - 100).add_suffix("_Return_pct")
-        ),
-        "performance_comparison.csv",
+    download_csv(
+        indexed,
+        "performance.csv",
         "performance_csv"
     )
 
@@ -1369,82 +1160,51 @@ def render_fundamentals():
 
     st.subheader("📑 Fundamentals")
 
-    st.info(
-        "Explore financial statements, historical financial "
-        "metrics, growth rates and valuation multiples."
+    ticker = st.text_input(
+        "Stock Symbol",
+        "AAPL",
+        key="fund_ticker"
+    ).upper().strip()
+
+    c1, c2, c3 = st.columns(3)
+
+    frequency = c1.radio(
+        "Frequency",
+        ["Annual", "Quarterly"]
     )
 
-    left, right = st.columns(2)
+    chart_type = c2.radio(
+        "Chart Type",
+        ["Line", "Bar"]
+    )
 
-    with left:
+    scale = c3.selectbox(
+        "Financial Scale",
+        ["Raw", "Millions", "Billions"],
+        index=2
+    )
 
-        ticker = st.text_input(
-            "Ticker Symbol",
-            value="AAPL",
-            key="fundamentals_ticker"
-        ).upper().strip()
-
-        frequency = st.radio(
-            "Frequency",
-            ["Annual", "Quarterly"],
-            horizontal=True
-        )
-
-        mode = st.radio(
-            "Mode",
-            ["Pinned Dashboard", "Single Metric"],
-            horizontal=True
-        )
-
-    with right:
-
-        scale = st.selectbox(
-            "Financial Statement Scale",
-            ["Raw", "Millions", "Billions"],
-            index=2
-        )
-
-        chart_type = st.radio(
-            "Chart Type",
-            ["Line", "Bar"],
-            horizontal=True
-        )
-
-        labels = st.checkbox(
-            "Show Data Labels",
-            value=True
-        )
-
-        capex_positive = st.checkbox(
-            "Show CAPEX as Positive Spending",
-            value=True
-        )
-
-        show_other = st.checkbox(
-            "Show Other Fundamentals",
-            value=True
-        )
+    labels = st.checkbox(
+        "Show Data Labels",
+        value=True,
+        key="fund_labels"
+    )
 
     if not ticker:
         return
 
-    with st.spinner("Loading financial statements..."):
+    statements = fetch_statements(ticker, frequency)
 
-        statements = fetch_statements(
-            ticker,
-            frequency
-        )
+    history = financial_history(
+        statements,
+        annual=frequency == "Annual"
+    )
 
-        info = fetch_ticker_info(ticker)
-
-        history = get_financial_history(
-            statements,
-            annual=frequency == "Annual"
-        )
+    info = fetch_info(ticker)
 
     if history.empty:
 
-        st.error("No financial statements are available.")
+        st.warning("No financial statements available.")
         return
 
     st.markdown(
@@ -1452,380 +1212,324 @@ def render_fundamentals():
     )
 
     st.caption(
-        "Statement currency: "
-        + str(info.get("financialCurrency", "Unknown"))
+        "Financial currency: " +
+        str(info.get("financialCurrency", "Unknown"))
     )
 
-    def show_metric(series, name, is_money=False):
+    divisor = {
+        "Raw": 1,
+        "Millions": 1e6,
+        "Billions": 1e9
+    }[scale]
 
-        series = series.dropna()
+    tabs = st.tabs([
+        "Pinned Dashboard",
+        "Financial Statements",
+        "Financial Ratios",
+        "TTM & Valuation"
+    ])
 
-        if series.empty:
-
-            st.warning(f"{name} is unavailable.")
-            return
-
-        if is_money:
-
-            series = scale_money(series, scale)
-
-            ylabel = f"{name} ({scale})"
-
-        else:
-
-            ylabel = name
-
-        series = series.rename(name)
-
-        plot_chart(
-            series,
-            name,
-            ylabel=ylabel,
-            chart_type=chart_type,
-            labels=labels
-        )
-
-        table = series.to_frame()
-
-        table.index = table.index.strftime("%Y-%m-%d")
-
-        st.dataframe(
-            table.style.format("{:,.2f}"),
-            use_container_width=True
-        )
-
-        csv_button(
-            table,
-            f"{ticker}_{name.replace(' ', '_')}.csv",
-            f"fund_{name}"
-        )
-
-    # --------------------------------------------------------
-    # TTM Financials and Valuation
-    # --------------------------------------------------------
-
-    st.markdown("### TTM Fundamentals & Valuation")
-
-    if frequency == "Quarterly":
-
-        quarterly = history.copy()
-
-        consecutive = (
-            quarterly.index.to_series()
-            .diff()
-            .dt.days
-            .between(60, 120)
-        )
-
-        valid_ttm = (
-            consecutive.rolling(3).sum() == 3
-        )
-
-        ttm = pd.DataFrame(index=quarterly.index)
-
-        for field in [
-            "Revenue",
-            "Net Income",
-            "Diluted EPS",
-            "EBITDA"
-        ]:
-
-            ttm[field] = (
-                quarterly[field]
-                .rolling(4, min_periods=4)
-                .sum()
-                .where(valid_ttm)
-            )
-
-        prices = fetch_prices(
-            [ticker],
-            (
-                ttm.index.min()
-                - pd.Timedelta(days=30)
-            ).strftime("%Y-%m-%d")
-        )
-
-        if ticker in prices.columns:
-
-            price = prices[ticker].dropna()
-
-            period_price = price.reindex(
-                ttm.index,
-                method="ffill"
-            )
-
-            ttm["P/E"] = safe_divide(
-                period_price,
-                ttm["Diluted EPS"]
-            )
-
-            shares = info.get(
-                "sharesOutstanding",
-                np.nan
-            )
-
-            try:
-                shares = float(shares)
-
-            except (TypeError, ValueError):
-                shares = np.nan
-
-            enterprise_value = (
-                period_price * shares
-                + quarterly["Total Debt"]
-                - quarterly["Cash"]
-            )
-
-            ttm["EV/EBITDA"] = safe_divide(
-                enterprise_value,
-                ttm["EBITDA"]
-            )
-
-        latest = ttm.iloc[-1]
-
-        metric_grid([
-            (
-                "Revenue TTM",
-                latest.get("Revenue"),
-                "money"
-            ),
-            (
-                "EPS TTM",
-                latest.get("Diluted EPS"),
-                "number"
-            ),
-            (
-                "P/E TTM",
-                latest.get("P/E"),
-                "multiple"
-            ),
-            (
-                "EV/EBITDA TTM",
-                latest.get("EV/EBITDA"),
-                "multiple"
-            )
-        ])
-
-        st.caption(
-            "Historical EV is approximate and uses current "
-            "shares outstanding with historical debt and cash."
-        )
+    with tabs[0]:
 
         c1, c2 = st.columns(2)
 
         with c1:
 
-            show_metric(
-                ttm["Revenue"],
-                "Revenue TTM",
-                True
+            plot_chart(
+                history["Revenue"] / divisor,
+                "Revenue",
+                scale,
+                chart_type,
+                labels
             )
 
-            if "P/E" in ttm:
+            plot_chart(
+                history["Revenue Growth (%)"],
+                "Revenue Growth",
+                "Percent",
+                chart_type,
+                labels
+            )
 
-                show_metric(
-                    ttm["P/E"],
-                    "P/E TTM"
-                )
+            plot_chart(
+                history["CAPEX"] / divisor,
+                "Capital Expenditures",
+                scale,
+                chart_type,
+                labels
+            )
 
         with c2:
 
-            show_metric(
-                ttm["Diluted EPS"],
-                "EPS TTM"
+            plot_chart(
+                history["Net Income"] / divisor,
+                "Net Income",
+                scale,
+                chart_type,
+                labels
             )
 
-            if "EV/EBITDA" in ttm:
+            plot_chart(
+                history["Diluted EPS"],
+                "Diluted EPS",
+                "Per Share",
+                chart_type,
+                labels
+            )
 
-                show_metric(
-                    ttm["EV/EBITDA"],
-                    "EV/EBITDA TTM"
-                )
+            plot_chart(
+                history["Free Cash Flow"] / divisor,
+                "Free Cash Flow",
+                scale,
+                chart_type,
+                labels
+            )
 
-    else:
-
-        st.info(
-            "Select Quarterly to view trailing "
-            "twelve-month financial metrics."
+        financial_table(
+            history,
+            [
+                "Revenue",
+                "Revenue Growth (%)",
+                "Net Income",
+                "Net Income Growth (%)",
+                "Diluted EPS",
+                "Diluted EPS Growth (%)",
+                "CAPEX",
+                "Free Cash Flow"
+            ]
         )
 
-    st.divider()
-
-    # --------------------------------------------------------
-    # Other Fundamentals
-    # --------------------------------------------------------
-
-    if show_other or mode == "Single Metric":
-
-        st.markdown("### Other Fundamentals")
+    with tabs[1]:
 
         statement = st.selectbox(
-            "Statement",
-            [
-                "Income Statement",
-                "Balance Sheet",
-                "Cash Flow",
-                "Computed Ratios"
-            ]
+            "Select Financial Statement",
+            list(statements.keys())
         )
 
-        lookup = {
-            "Income Statement": "income",
-            "Balance Sheet": "balance",
-            "Cash Flow": "cash"
-        }
+        frame = statements[statement]
 
-        if statement == "Computed Ratios":
+        if not frame.empty:
 
-            options = [
-                c for c in history.columns
-                if (
-                    "(%)" in c
-                    or c in [
-                        "Debt / Equity",
-                        "Debt / EBITDA",
-                        "Current Ratio",
-                        "Interest Coverage"
-                    ]
-                )
-            ]
+            selected = st.selectbox(
+                "Select Financial Metric",
+                list(frame.index)
+            )
 
-            if options:
+            series = statement_row(frame, selected)
 
-                metric = st.selectbox(
-                    "Financial Metric",
-                    options
-                )
+            normalized = normalize_label(selected)
 
-                show_metric(
-                    history[metric],
-                    metric
-                )
+            is_money = not any(
+                word in normalized
+                for word in ["eps", "shares", "pershare", "ratio", "rate"]
+            )
+
+            plot_chart(
+                series / divisor if is_money else series,
+                selected,
+                scale if is_money else "",
+                chart_type,
+                labels
+            )
+
+            st.dataframe(
+                frame,
+                use_container_width=True
+            )
+
+            download_csv(
+                frame,
+                f"{ticker}_{statement}.csv",
+                "statement_csv"
+            )
 
         else:
 
-            frame = statements[lookup[statement]]
+            st.warning("Statement unavailable.")
 
-            if not frame.empty:
+    with tabs[2]:
 
-                metric = st.selectbox(
-                    "Financial Metric",
-                    list(frame.index)
-                )
+        fields = [
+            column for column in history.columns
+            if "(%)" in column or column in [
+                "Debt / Equity",
+                "Current Ratio",
+                "Quick Ratio",
+                "Debt / EBITDA",
+                "Interest Coverage"
+            ]
+        ]
 
-                series = statement_row(
-                    frame,
-                    metric
-                )
-
-                normalized = normalize_label(metric)
-
-                is_money = not any(
-                    item in normalized
-                    for item in [
-                        "eps",
-                        "shares",
-                        "ratio",
-                        "rate",
-                        "pershare"
-                    ]
-                )
-
-                show_metric(
-                    series,
-                    metric,
-                    is_money
-                )
-
-            else:
-
-                st.warning(
-                    "Statement data is unavailable."
-                )
-
-    # --------------------------------------------------------
-    # Pinned Fundamentals Dashboard
-    # --------------------------------------------------------
-
-    if mode == "Pinned Dashboard":
-
-        st.divider()
-
-        st.markdown(
-            "### Pinned Fundamentals Dashboard"
+        selected = st.selectbox(
+            "Select Financial Ratio",
+            fields
         )
 
-        c1, c2 = st.columns(2)
+        plot_chart(
+            history[selected],
+            selected,
+            "Percent" if "(%)" in selected else "Multiple",
+            chart_type,
+            labels
+        )
 
-        with c1:
+        financial_table(history, fields)
 
-            show_metric(
-                history["Revenue"],
+    with tabs[3]:
+
+        quarterly = financial_history(
+            fetch_statements(ticker, "Quarterly"),
+            annual=False
+        )
+
+        if len(quarterly) >= 4:
+
+            ttm = pd.DataFrame(index=quarterly.index)
+
+            intervals = (
+                quarterly.index.to_series()
+                .diff()
+                .dt.days
+                .between(60, 120)
+            )
+
+            valid = intervals.rolling(3).sum() == 3
+
+            for field in [
                 "Revenue",
-                True
+                "Net Income",
+                "Diluted EPS",
+                "EBITDA",
+                "Free Cash Flow"
+            ]:
+
+                ttm[field] = (
+                    quarterly[field]
+                    .rolling(4, min_periods=4)
+                    .sum()
+                    .where(valid)
+                )
+
+            latest = ttm.iloc[-1]
+
+            metric_grid([
+                ("Revenue TTM", latest["Revenue"], "money"),
+                ("Net Income TTM", latest["Net Income"], "money"),
+                ("EPS TTM", latest["Diluted EPS"], "number"),
+                ("FCF TTM", latest["Free Cash Flow"], "money"),
+                ("Trailing P/E", info.get("trailingPE"), "multiple"),
+                ("Forward P/E", info.get("forwardPE"), "multiple"),
+                ("EV/EBITDA", info.get("enterpriseToEbitda"), "multiple")
+            ])
+
+            plot_chart(
+                ttm["Revenue"] / divisor,
+                "Trailing Twelve-Month Revenue",
+                scale,
+                chart_type,
+                labels
             )
 
-            show_metric(
-                history["Revenue Growth (%)"],
-                "Revenue Growth (%)"
+            plot_chart(
+                ttm["Diluted EPS"],
+                "Trailing Twelve-Month EPS",
+                "EPS",
+                chart_type,
+                labels
             )
 
-            capex = history["CAPEX"]
+            quote_currency = info.get("currency")
 
-            if not capex_positive:
-                capex = -capex
+            financial_currency = info.get("financialCurrency")
 
-            show_metric(
-                capex,
-                "CAPEX",
-                True
+            if quote_currency and quote_currency == financial_currency:
+
+                prices = fetch_prices(
+                    (ticker,),
+                    (
+                        ttm.index.min() -
+                        pd.Timedelta(days=30)
+                    ).strftime("%Y-%m-%d")
+                )
+
+                if ticker in prices.columns:
+
+                    price = prices[ticker].dropna().sort_index()
+
+                    period_price = price.reindex(
+                        ttm.index,
+                        method="ffill"
+                    )
+
+                    ttm["Historical P/E"] = safe_divide(
+                        period_price,
+                        ttm["Diluted EPS"]
+                    )
+
+                    plot_chart(
+                        ttm["Historical P/E"],
+                        "Fiscal Period-End P/E",
+                        "Multiple",
+                        chart_type,
+                        labels
+                    )
+
+                    shares = number(info.get("sharesOutstanding"))
+
+                    enterprise = (
+                        period_price * shares +
+                        quarterly["Total Debt"] -
+                        quarterly["Cash"]
+                    )
+
+                    ttm["Approximate EV/EBITDA"] = safe_divide(
+                        enterprise,
+                        ttm["EBITDA"]
+                    )
+
+                    plot_chart(
+                        ttm["Approximate EV/EBITDA"],
+                        "Approximate Historical EV/EBITDA",
+                        "Multiple",
+                        chart_type,
+                        labels
+                    )
+
+                    st.caption(
+                        "Historical EV uses current shares outstanding. "
+                        "Fiscal period-end ratios are not point-in-time "
+                        "backtesting data."
+                    )
+
+            st.dataframe(
+                ttm,
+                use_container_width=True
             )
 
-            show_metric(
-                growth_rate(history["CAPEX"]),
-                "CAPEX Growth (%)"
+        else:
+
+            st.warning(
+                "At least four quarters are needed for TTM calculations."
             )
 
-        with c2:
-
-            show_metric(
-                history["Diluted EPS"],
-                "Diluted EPS"
-            )
-
-            show_metric(
-                history["Diluted EPS Growth (%)"],
-                "EPS Growth (%)"
-            )
-
-            show_metric(
-                history["Net Margin (%)"],
-                "Net Margin (%)"
-            )
-
-        csv_button(
-            history,
-            f"{ticker}_{frequency}_fundamentals.csv",
-            "fundamentals_all_csv"
-        )
+    download_csv(
+        history,
+        f"{ticker}_fundamentals.csv",
+        "fund_all_csv"
+    )
 
 
 # ============================================================
-# TECHNICAL INDICATOR HELPERS
+# TECHNICAL INDICATORS
 # ============================================================
 
-def sma(series, window):
+def rsi(close, length=14):
 
-    return series.rolling(window).mean()
-
-
-def rsi(series, length=14):
-
-    delta = series.diff()
+    delta = close.diff()
 
     gain = delta.clip(lower=0)
 
-    loss = (-delta).clip(lower=0)
+    loss = -delta.clip(upper=0)
 
     average_gain = gain.ewm(
         alpha=1 / length,
@@ -1839,68 +1543,57 @@ def rsi(series, length=14):
         min_periods=length
     ).mean()
 
-    relative_strength = (
-        average_gain /
-        average_loss.replace(0, np.nan)
-    )
+    rs = average_gain / average_loss.replace(0, np.nan)
 
-    result = 100 - (
-        100 / (1 + relative_strength)
-    )
+    result = 100 - 100 / (1 + rs)
 
     result = result.mask(
-        (average_loss == 0)
-        & (average_gain > 0),
+        (average_loss == 0) & (average_gain > 0),
         100
     )
 
     result = result.mask(
-        (average_loss == 0)
-        & (average_gain == 0),
+        (average_loss == 0) & (average_gain == 0),
         50
     )
 
     return result
 
 
-def realized_volatility(series, window=20):
-
-    returns = np.log(
-        series / series.shift(1)
-    )
-
-    return (
-        returns.rolling(window).std()
-        * np.sqrt(252)
-        * 100
-    )
-
-
-def percentile_rank(series, window=252):
-
-    series = series.dropna().tail(window)
-
-    if len(series) < 5:
-        return np.nan
-
-    return (
-        series.rank(pct=True).iloc[-1]
-        * 100
-    )
-
-
-def series_slope(series, window=20):
+def slope(series, window=20):
 
     series = series.dropna().tail(window)
 
     if len(series) < window:
         return np.nan
 
-    x = np.arange(len(series))
-
     return float(
-        np.polyfit(x, series.values, 1)[0]
+        np.polyfit(
+            np.arange(len(series)),
+            series.values,
+            1
+        )[0]
     )
+
+
+def realized_volatility(series, window=20):
+
+    returns = np.log(series / series.shift(1))
+
+    return (
+        returns.rolling(window).std() *
+        np.sqrt(252) * 100
+    )
+
+
+def percentile_rank(series, window):
+
+    series = series.dropna().tail(window)
+
+    if len(series) < window:
+        return np.nan
+
+    return series.rank(pct=True).iloc[-1] * 100
 
 
 # ============================================================
@@ -1911,15 +1604,11 @@ def render_technicals():
 
     st.subheader("🧭 Technicals")
 
-    st.info(
-        "Market breadth, sentiment, volatility, momentum "
-        "and composite market risk indicators."
-    )
-
     st.sidebar.markdown("---")
+
     st.sidebar.subheader("Technical Controls")
 
-    lookback = st.sidebar.radio(
+    period = st.sidebar.radio(
         "Lookback Period",
         ["1Y", "2Y", "5Y", "Max"],
         index=1
@@ -1927,7 +1616,7 @@ def render_technicals():
 
     slope_window = st.sidebar.slider(
         "Breadth Slope Window",
-        10, 60, 20, 5
+        10, 60, 20
     )
 
     rsi_length = st.sidebar.slider(
@@ -1935,47 +1624,49 @@ def render_technicals():
         7, 28, 14
     )
 
-    volatility_window = st.sidebar.slider(
-        "Realized Volatility Window",
-        10, 60, 20, 5
+    vol_window = st.sidebar.slider(
+        "Volatility Window",
+        10, 60, 20
     )
 
-    percentile_window = st.sidebar.radio(
-        "VIX Percentile Window",
+    pct_window = st.sidebar.radio(
+        "VIX Percentile Period",
         ["1Y", "3Y", "5Y"]
     )
 
-    percentile_days = {
+    pct_days = {
         "1Y": 252,
         "3Y": 756,
         "5Y": 1260
-    }[percentile_window]
-
-    start_date = period_start_date(lookback)
+    }[pct_window]
 
     prices = fetch_prices(
-        ["SPY", "RSP", "QQQ", "IWM", "^VIX", "^VVIX"],
-        start_date
+        ("SPY", "RSP", "QQQ", "IWM", "^VIX", "^VVIX"),
+        start_date(period)
     )
 
     if prices.empty:
 
-        st.error("Unable to download market data.")
+        st.warning("Unable to download market data.")
         return
 
-    def get_series(symbol):
+    def series(symbol):
 
-        if symbol in prices.columns:
+        if symbol in prices:
             return prices[symbol].dropna()
 
         return pd.Series(dtype=float)
 
-    spy = get_series("SPY")
-    rsp = get_series("RSP")
-    qqq = get_series("QQQ")
-    iwm = get_series("IWM")
-    vix = get_series("^VIX")
-    vvix = get_series("^VVIX")
+    spy = series("SPY")
+    rsp = series("RSP")
+    qqq = series("QQQ")
+    iwm = series("IWM")
+    vix = series("^VIX")
+    vvix = series("^VVIX")
+
+    breadth = (rsp / spy).dropna()
+
+    growth = (qqq / iwm).dropna()
 
     tabs = st.tabs([
         "Breadth Proxies",
@@ -1985,101 +1676,41 @@ def render_technicals():
         "Composite Risk Gauge"
     ])
 
-    # --------------------------------------------------------
-    # Breadth
-    # --------------------------------------------------------
-
     with tabs[0]:
 
-        st.markdown("### Market Breadth Proxies")
-
-        rsp_spy = (rsp / spy).dropna()
-
-        qqq_iwm = (qqq / iwm).dropna()
-
-        breadth_slope = series_slope(
-            rsp_spy,
-            slope_window
-        )
-
-        growth_slope = series_slope(
-            qqq_iwm,
-            slope_window
-        )
-
-        a, b = st.columns(2)
-
-        a.metric(
-            "RSP/SPY Slope",
-            (
-                f"{breadth_slope:.6f}"
-                if pd.notna(breadth_slope)
-                else "N/A"
-            ),
-            (
-                "Broadening"
-                if breadth_slope > 0
-                else "Narrowing"
-            ) if pd.notna(breadth_slope) else None
-        )
-
-        b.metric(
-            "QQQ/IWM Slope",
-            (
-                f"{growth_slope:.6f}"
-                if pd.notna(growth_slope)
-                else "N/A"
-            ),
-            (
-                "Large Caps Leading"
-                if growth_slope > 0
-                else "Small Caps Improving"
-            ) if pd.notna(growth_slope) else None
-        )
+        metric_grid([
+            ("RSP/SPY Slope", slope(breadth, slope_window), "number"),
+            ("QQQ/IWM Slope", slope(growth, slope_window), "number")
+        ], columns=2)
 
         plot_chart(
-            rsp_spy.rename("RSP/SPY"),
+            breadth.rename("RSP/SPY"),
             "Equal Weight vs Cap Weighted"
         )
 
         plot_chart(
-            qqq_iwm.rename("QQQ/IWM"),
-            "Large Cap Growth vs Small Caps"
+            growth.rename("QQQ/IWM"),
+            "Large Caps vs Small Caps"
         )
-
-    # --------------------------------------------------------
-    # Sentiment and Volatility
-    # --------------------------------------------------------
 
     with tabs[1]:
 
-        st.markdown("### Sentiment & Volatility")
+        if not vix.empty:
 
-        if vix.empty:
+            vix_ma = vix.rolling(50).mean()
 
-            st.warning("VIX data is unavailable.")
-
-        else:
-
-            vix_ma = sma(vix, 50)
-
-            long_vix = fetch_prices(
-                ["^VIX"],
-                period_start_date(percentile_window)
+            longer = fetch_prices(
+                ("^VIX",),
+                start_date("10Y")
             )
 
-            percentile_series = (
-                long_vix["^VIX"]
-                if "^VIX" in long_vix.columns
-                else vix
+            longer_vix = (
+                longer["^VIX"]
+                if "^VIX" in longer else vix
             )
 
             metric_grid([
-                (
-                    "VIX",
-                    vix.iloc[-1],
-                    "number"
-                ),
+                ("VIX", vix.iloc[-1], "number"),
                 (
                     "VIX vs 50 DMA",
                     vix.iloc[-1] - vix_ma.iloc[-1],
@@ -2087,10 +1718,7 @@ def render_technicals():
                 ),
                 (
                     "VIX Percentile",
-                    percentile_rank(
-                        percentile_series,
-                        percentile_days
-                    ),
+                    percentile_rank(longer_vix, pct_days),
                     "percent"
                 )
             ])
@@ -2107,36 +1735,27 @@ def render_technicals():
 
             plot_chart(
                 vvix.rename("VVIX"),
-                "VVIX - Volatility of Volatility"
+                "Volatility of Volatility"
             )
-
-    # --------------------------------------------------------
-    # Trend and Momentum
-    # --------------------------------------------------------
 
     with tabs[2]:
 
-        st.markdown("### Trend & Momentum")
-
         for symbol in ["SPY", "QQQ", "IWM"]:
 
-            close = get_series(symbol)
+            close = series(symbol)
 
             if close.empty:
                 continue
 
-            st.markdown(f"#### {symbol}")
+            st.markdown(f"### {symbol}")
 
-            ma50 = sma(close, 50)
+            ma50 = close.rolling(50).mean()
 
-            ma200 = sma(close, 200)
+            ma100 = close.rolling(100).mean()
 
-            strength = rsi(
-                close,
-                rsi_length
-            )
+            ma200 = close.rolling(200).mean()
 
-            last_price = close.iloc[-1]
+            strength = rsi(close, rsi_length)
 
             trend = "N/A"
 
@@ -2144,73 +1763,35 @@ def render_technicals():
 
                 trend = (
                     "Bullish"
-                    if last_price > ma200.iloc[-1]
+                    if close.iloc[-1] > ma200.iloc[-1]
                     else "Bearish"
                 )
 
-            a, b, c = st.columns(3)
+            c1, c2, c3 = st.columns(3)
 
-            a.metric(
-                "Price",
-                fmt(last_price)
-            )
+            c1.metric("Price", fmt(close.iloc[-1]))
 
-            b.metric(
-                "200 DMA Trend",
-                trend
-            )
+            c2.metric("200 DMA Trend", trend)
 
-            last_rsi = strength.iloc[-1]
-
-            zone = None
-
-            if pd.notna(last_rsi):
-
-                if last_rsi >= 70:
-                    zone = "Overbought"
-
-                elif last_rsi <= 30:
-                    zone = "Oversold"
-
-                else:
-                    zone = "Neutral"
-
-            c.metric(
-                "RSI",
-                fmt(last_rsi),
-                zone
-            )
-
-            chart_data = pd.concat([
-                close.rename(symbol),
-                ma50.rename("50 DMA"),
-                ma200.rename("200 DMA")
-            ], axis=1)
+            c3.metric("RSI", fmt(strength.iloc[-1]))
 
             plot_chart(
-                chart_data,
-                f"{symbol} Price & Moving Averages"
+                pd.concat([
+                    close.rename(symbol),
+                    ma50.rename("50 DMA"),
+                    ma100.rename("100 DMA"),
+                    ma200.rename("200 DMA")
+                ], axis=1),
+                f"{symbol} Moving Averages"
             )
 
             fig, ax = plt.subplots(figsize=(12, 3))
 
-            ax.plot(
-                strength.index,
-                strength,
-                label="RSI"
-            )
+            ax.plot(strength.index, strength)
 
-            ax.axhline(
-                70,
-                linestyle="--",
-                color="red"
-            )
+            ax.axhline(70, linestyle="--", color="red")
 
-            ax.axhline(
-                30,
-                linestyle="--",
-                color="green"
-            )
+            ax.axhline(30, linestyle="--", color="green")
 
             ax.set_ylim(0, 100)
 
@@ -2218,53 +1799,18 @@ def render_technicals():
 
             ax.grid(True, alpha=0.3)
 
-            plt.tight_layout()
-
             st.pyplot(fig)
 
             plt.close(fig)
 
-            st.divider()
-
-    # --------------------------------------------------------
-    # Volatility Regime
-    # --------------------------------------------------------
-
     with tabs[3]:
 
-        st.markdown(
-            "### Realized vs Implied Volatility"
-        )
-
-        if spy.empty:
-
-            st.warning("SPY prices are unavailable.")
-
-        else:
+        if not spy.empty:
 
             realized = realized_volatility(
                 spy,
-                volatility_window
+                vol_window
             )
-
-            latest_vix = (
-                vix.iloc[-1]
-                if not vix.empty
-                else np.nan
-            )
-
-            metric_grid([
-                (
-                    "Realized Volatility",
-                    realized.iloc[-1],
-                    "percent"
-                ),
-                (
-                    "Implied Volatility (VIX)",
-                    latest_vix,
-                    "percent"
-                )
-            ])
 
             plot_chart(
                 pd.concat([
@@ -2272,71 +1818,54 @@ def render_technicals():
                     vix.rename("VIX")
                 ], axis=1),
                 "Realized vs Implied Volatility",
-                ylabel="Volatility (%)"
+                "Percent"
             )
-
-    # --------------------------------------------------------
-    # Composite Risk Gauge
-    # --------------------------------------------------------
 
     with tabs[4]:
 
-        st.markdown("### Composite Market Risk Gauge")
+        st.markdown("### Composite Risk Gauge")
 
-        market_ma = sma(spy, 200)
+        ma200 = spy.rolling(200).mean()
 
-        breadth = (rsp / spy).dropna()
+        vix50 = vix.rolling(50).mean()
 
-        slope = series_slope(
-            breadth,
-            slope_window
-        )
-
-        vix_average = sma(vix, 50)
+        breadth_slope = slope(breadth, slope_window)
 
         trend_ok = None
 
         breadth_ok = None
 
-        volatility_ok = None
+        vol_ok = None
 
-        if not spy.empty and pd.notna(
-            market_ma.iloc[-1]
-        ):
+        if not spy.empty and pd.notna(ma200.iloc[-1]):
 
-            trend_ok = bool(
-                spy.iloc[-1] > market_ma.iloc[-1]
-            )
+            trend_ok = bool(spy.iloc[-1] > ma200.iloc[-1])
 
-        if pd.notna(slope):
+        if pd.notna(breadth_slope):
 
-            breadth_ok = bool(slope > 0)
+            breadth_ok = bool(breadth_slope > 0)
 
-        if not vix.empty and pd.notna(
-            vix_average.iloc[-1]
-        ):
+        if not vix.empty and pd.notna(vix50.iloc[-1]):
 
-            volatility_ok = bool(
-                vix.iloc[-1] < vix_average.iloc[-1]
-            )
+            vol_ok = bool(vix.iloc[-1] < vix50.iloc[-1])
 
         components = [
             ("Trend", trend_ok, 34),
             ("Breadth", breadth_ok, 33),
-            ("Volatility", volatility_ok, 33)
+            ("Volatility", vol_ok, 33)
         ]
+
+        rows = []
 
         score = 0
 
         available = 0
 
-        rows = []
+        for name, condition, weight in components:
 
-        for name, status, weight in components:
+            if condition is None:
 
-            if status is None:
-
-                label = "N/A"
+                status = "N/A"
 
                 points = np.nan
 
@@ -2344,32 +1873,25 @@ def render_technicals():
 
                 available += weight
 
-                label = (
-                    "Positive"
-                    if status
-                    else "Negative"
-                )
+                status = "Positive" if condition else "Negative"
 
-                points = weight if status else 0
+                points = weight if condition else 0
 
                 score += points
 
             rows.append({
                 "Component": name,
-                "Status": label,
+                "Status": status,
                 "Points": points
             })
 
         if available == 100:
 
-            if score >= 67:
-                regime = "Risk-On"
-
-            elif score >= 34:
-                regime = "Neutral"
-
-            else:
-                regime = "Risk-Off"
+            regime = (
+                "Risk-On" if score >= 67
+                else "Neutral" if score >= 34
+                else "Risk-Off"
+            )
 
             st.metric(
                 "Market Risk Gauge",
@@ -2381,9 +1903,7 @@ def render_technicals():
 
         else:
 
-            st.warning(
-                "Insufficient data for a complete risk score."
-            )
+            st.warning("Insufficient data for a complete score.")
 
         st.dataframe(
             pd.DataFrame(rows),
@@ -2391,14 +1911,9 @@ def render_technicals():
         )
 
         st.caption(
-            "Trend: SPY above its 200-day average. "
-            "Breadth: RSP/SPY slope is positive. "
-            "Volatility: VIX below its 50-day average."
-        )
-
-        plot_chart(
-            breadth.rename("RSP/SPY"),
-            "Market Breadth Proxy"
+            "Trend = SPY above 200 DMA. "
+            "Breadth = positive RSP/SPY slope. "
+            "Volatility = VIX below 50 DMA."
         )
 
 
@@ -2406,25 +1921,15 @@ def render_technicals():
 # PAGE 5: COMPANY OVERVIEW
 # ============================================================
 
-def render_company_overview():
+def render_company():
 
     st.subheader("🏢 Company Overview")
 
-    st.info(
-        "Enter a stock ticker to view three years of financial "
-        "performance, growth, valuation, profitability, "
-        "capital efficiency and financial health."
-    )
+    with st.form("company_form"):
 
-    # --------------------------------------------------------
-    # Ticker Input
-    # --------------------------------------------------------
-
-    with st.form("company_overview_form"):
-
-        ticker_input = st.text_input(
+        symbol = st.text_input(
             "Enter Stock Symbol",
-            value="AAPL"
+            "AAPL"
         ).upper().strip()
 
         submitted = st.form_submit_button(
@@ -2432,242 +1937,115 @@ def render_company_overview():
             type="primary"
         )
 
-    if submitted or "overview_ticker" not in st.session_state:
+    if submitted or "company_symbol" not in st.session_state:
 
-        st.session_state[
-            "overview_ticker"
-        ] = ticker_input
+        st.session_state["company_symbol"] = symbol
 
-    ticker = st.session_state["overview_ticker"]
+    ticker = st.session_state["company_symbol"]
 
-    if not ticker or len(ticker.split()) != 1:
-
-        st.warning("Please enter one valid stock symbol.")
+    if not ticker:
         return
 
-    # --------------------------------------------------------
-    # Download Company Data
-    # --------------------------------------------------------
+    with st.spinner("Loading Company Financials..."):
 
-    with st.spinner(f"Loading {ticker} financial data..."):
+        info = fetch_info(ticker)
 
-        info = fetch_ticker_info(ticker)
-
-        statements = fetch_statements(
-            ticker,
-            "Annual"
-        )
-
-        history = get_financial_history(
-            statements,
-            annual=True
+        history = financial_history(
+            fetch_statements(ticker, "Annual")
         )
 
     if not info and history.empty:
 
-        st.error(
-            "No company data returned. "
-            "Check the ticker symbol and try again."
-        )
-
+        st.error("No company data available.")
         return
 
-    # --------------------------------------------------------
-    # Company Profile
-    # --------------------------------------------------------
-
-    company_name = (
-        info.get("longName")
-        or info.get("shortName")
-        or ticker
-    )
-
     st.markdown(
-        f"## {company_name} ({ticker})"
-    )
-
-    sector = info.get("sector", "N/A")
-
-    industry = info.get("industry", "N/A")
-
-    exchange = info.get("exchange", "N/A")
-
-    currency = info.get("currency", "Unknown")
-
-    financial_currency = info.get(
-        "financialCurrency",
-        "Unknown"
+        f"## {info.get('longName', ticker)} ({ticker})"
     )
 
     st.caption(
-        f"Sector: {sector} | "
-        f"Industry: {industry} | "
-        f"Exchange: {exchange}"
+        f"Sector: {info.get('sector', 'N/A')} | "
+        f"Industry: {info.get('industry', 'N/A')}"
     )
 
     st.caption(
-        f"Quote Currency: {currency} | "
-        f"Financial Statement Currency: {financial_currency}"
+        f"Quote Currency: {info.get('currency', 'N/A')} | "
+        f"Financial Currency: {info.get('financialCurrency', 'N/A')}"
     )
 
-    def get_value(key, multiplier=1):
+    def v(key, multiplier=1):
 
-        try:
+        return number(info.get(key)) * multiplier
 
-            value = float(info.get(key)) * multiplier
-
-            return (
-                value
-                if np.isfinite(value)
-                else np.nan
-            )
-
-        except (TypeError, ValueError):
-
-            return np.nan
-
-    price = get_value("currentPrice")
-
-    if pd.isna(price):
-
-        price = get_value("regularMarketPrice")
-
-    # --------------------------------------------------------
-    # Company Market Snapshot
-    # --------------------------------------------------------
+    price = number(
+        info.get("currentPrice"),
+        number(info.get("regularMarketPrice"))
+    )
 
     st.markdown("### Market Snapshot")
 
     metric_grid([
-        (
-            "Current Share Price",
-            price,
-            "number"
-        ),
-        (
-            "Market Capitalization",
-            get_value("marketCap"),
-            "money"
-        ),
-        (
-            "52-Week High",
-            get_value("fiftyTwoWeekHigh"),
-            "number"
-        ),
-        (
-            "52-Week Low",
-            get_value("fiftyTwoWeekLow"),
-            "number"
-        ),
-        (
-            "Enterprise Value",
-            get_value("enterpriseValue"),
-            "money"
-        ),
-        (
-            "Beta",
-            get_value("beta"),
-            "number"
-        ),
-        (
-            "50-Day Moving Average",
-            get_value("fiftyDayAverage"),
-            "number"
-        ),
-        (
-            "200-Day Moving Average",
-            get_value("twoHundredDayAverage"),
-            "number"
-        )
+        ("Share Price", price, "number"),
+        ("Market Cap", v("marketCap"), "money"),
+        ("Enterprise Value", v("enterpriseValue"), "money"),
+        ("Beta", v("beta"), "number"),
+        ("52-Week High", v("fiftyTwoWeekHigh"), "number"),
+        ("52-Week Low", v("fiftyTwoWeekLow"), "number"),
+        ("50 DMA", v("fiftyDayAverage"), "number"),
+        ("200 DMA", v("twoHundredDayAverage"), "number")
     ])
 
-    if info.get("longBusinessSummary"):
+    with st.expander("Company Description"):
 
-        with st.expander("About the Company"):
-
-            st.write(
-                info["longBusinessSummary"]
+        st.write(
+            info.get(
+                "longBusinessSummary",
+                "Description unavailable."
             )
+        )
 
     st.divider()
 
     # --------------------------------------------------------
-    # Three-Year Financial Summary
+    # Historical Financial Statements
     # --------------------------------------------------------
 
     st.markdown("### Three-Year Financial Summary")
 
-    if history.empty:
+    recent = history.tail(3)
 
-        st.warning(
-            "Annual financial statements are unavailable. "
-            "Current valuation metrics may still be available."
-        )
+    latest = (
+        recent.iloc[-1]
+        if not recent.empty
+        else pd.Series(dtype=float)
+    )
 
-        recent = pd.DataFrame()
+    fields = [
+        "Revenue",
+        "Revenue Growth (%)",
+        "Gross Profit",
+        "Operating Income",
+        "Operating Income Growth (%)",
+        "Net Income",
+        "Net Income Growth (%)",
+        "Diluted EPS",
+        "Diluted EPS Growth (%)",
+        "EBITDA",
+        "Operating Cash Flow",
+        "CAPEX",
+        "Free Cash Flow",
+        "Free Cash Flow Growth (%)"
+    ]
 
-        latest = pd.Series(dtype=float)
+    financial_table(recent, fields)
 
-    else:
-
-        # Annual income statement dates are used to identify
-        # completed reporting periods.
-
-        income_dates = statements["income"].columns
-
-        history = history.loc[
-            history.index.isin(income_dates)
-        ]
-
-        recent = history.tail(3)
-
-        latest = (
-            recent.iloc[-1]
-            if not recent.empty
-            else pd.Series(dtype=float)
-        )
-
-        if len(recent) < 3:
-
-            st.warning(
-                "Fewer than three fiscal years are available."
-            )
-
-        summary_fields = [
-            "Revenue",
-            "Revenue Growth (%)",
-            "Gross Profit",
-            "Operating Income",
-            "Operating Income Growth (%)",
-            "Net Income",
-            "Net Income Growth (%)",
-            "Diluted EPS",
-            "Diluted EPS Growth (%)",
-            "EBITDA",
-            "Operating Cash Flow",
-            "CAPEX",
-            "Free Cash Flow",
-            "Free Cash Flow Growth (%)"
-        ]
-
-        financial_table(
-            recent,
-            summary_fields
-        )
-
-        st.caption(
-            "Financial periods are based on company fiscal "
-            "year-end dates. Growth is calculated year over year. "
-            "Growth from a nonpositive prior-year value is N/A."
-        )
-
-    # --------------------------------------------------------
-    # Financial Charts
-    # --------------------------------------------------------
+    st.caption(
+        "Annual fiscal-year data. Growth rates are calculated "
+        "from financial statements. Growth from nonpositive "
+        "prior values is displayed as N/A."
+    )
 
     if not recent.empty:
-
-        st.markdown("### Financial Performance Charts")
 
         c1, c2 = st.columns(2)
 
@@ -2676,9 +2054,9 @@ def render_company_overview():
             plot_chart(
                 recent["Revenue"] / 1e9,
                 "Annual Revenue",
-                ylabel=f"Billions ({financial_currency})",
-                chart_type="Bar",
-                labels=True
+                "Billions",
+                "Bar",
+                True
             )
 
             plot_chart(
@@ -2686,10 +2064,10 @@ def render_company_overview():
                     "Revenue Growth (%)",
                     "Net Income Growth (%)"
                 ]],
-                "Revenue & Net Income Growth",
-                ylabel="Growth (%)",
-                chart_type="Bar",
-                labels=True
+                "Revenue and Earnings Growth",
+                "Percent",
+                "Bar",
+                True
             )
 
         with c2:
@@ -2701,9 +2079,9 @@ def render_company_overview():
                     "Net Income"
                 ]] / 1e9,
                 "Annual Profits",
-                ylabel=f"Billions ({financial_currency})",
-                chart_type="Bar",
-                labels=True
+                "Billions",
+                "Bar",
+                True
             )
 
             plot_chart(
@@ -2712,323 +2090,153 @@ def render_company_overview():
                     "Free Cash Flow"
                 ]] / 1e9,
                 "Cash Flow",
-                ylabel=f"Billions ({financial_currency})",
-                chart_type="Bar",
-                labels=True
+                "Billions",
+                "Bar",
+                True
             )
 
     st.divider()
 
     # --------------------------------------------------------
-    # Valuation Ratios
+    # Yahoo Finance Valuation Ratios
     # --------------------------------------------------------
 
-    st.markdown("### Valuation Ratios")
+    st.markdown("### Current Valuation Ratios")
 
-    peg = get_value("trailingPegRatio")
+    st.caption(
+        "Source: Yahoo Finance quote statistics. "
+        "Reporting periods follow the provider's definitions."
+    )
 
-    if pd.isna(peg):
-
-        peg = get_value("pegRatio")
+    peg = number(
+        info.get("trailingPegRatio"),
+        number(info.get("pegRatio"))
+    )
 
     metric_grid([
-        (
-            "Trailing P/E",
-            get_value("trailingPE"),
-            "multiple"
-        ),
-        (
-            "Forward P/E",
-            get_value("forwardPE"),
-            "multiple"
-        ),
-        (
-            "Price / Sales",
-            get_value("priceToSalesTrailing12Months"),
-            "multiple"
-        ),
-        (
-            "PEG Ratio",
-            peg,
-            "multiple"
-        ),
-        (
-            "Price / Book",
-            get_value("priceToBook"),
-            "multiple"
-        ),
-        (
-            "EV / EBITDA",
-            get_value("enterpriseToEbitda"),
-            "multiple"
-        ),
-        (
-            "EV / Revenue",
-            get_value("enterpriseToRevenue"),
-            "multiple"
-        ),
-        (
-            "Earnings Yield",
-            (
-                100 / get_value("trailingPE")
-                if get_value("trailingPE") > 0
-                else np.nan
-            ),
-            "percent"
-        )
+        ("Trailing P/E", v("trailingPE"), "multiple"),
+        ("Forward P/E", v("forwardPE"), "multiple"),
+        ("Price / Sales", v("priceToSalesTrailing12Months"), "multiple"),
+        ("PEG Ratio", peg, "multiple"),
+        ("Price / Book", v("priceToBook"), "multiple"),
+        ("EV / EBITDA", v("enterpriseToEbitda"), "multiple"),
+        ("EV / Revenue", v("enterpriseToRevenue"), "multiple"),
+        ("Earnings Yield", divide(100, v("trailingPE")), "percent")
     ])
 
-    market_cap = get_value("marketCap")
+    st.divider()
 
-    free_cash_flow = get_value("freeCashflow")
+    # --------------------------------------------------------
+    # Current Profitability
+    # --------------------------------------------------------
+
+    st.markdown("### Current Profitability")
+
+    st.caption("Source: Yahoo Finance reported profitability ratios.")
+
+    metric_grid([
+        ("ROE", v("returnOnEquity", 100), "percent"),
+        ("ROA", v("returnOnAssets", 100), "percent"),
+        ("Gross Margin", v("grossMargins", 100), "percent"),
+        ("Operating Margin", v("operatingMargins", 100), "percent"),
+        ("Net Margin", v("profitMargins", 100), "percent"),
+        ("EBITDA Margin", v("ebitdaMargins", 100), "percent"),
+        ("Revenue Growth", v("revenueGrowth", 100), "percent"),
+        ("Quarterly Earnings Growth", v("earningsQuarterlyGrowth", 100), "percent")
+    ])
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # Financial Health
+    # --------------------------------------------------------
+
+    st.markdown("### Current Financial Health")
+
+    st.caption("Source: Yahoo Finance quote statistics.")
+
+    metric_grid([
+        ("Debt / Equity", v("debtToEquity", 0.01), "multiple"),
+        ("Current Ratio", v("currentRatio"), "multiple"),
+        ("Quick Ratio", v("quickRatio"), "multiple"),
+        ("Total Debt", v("totalDebt"), "money"),
+        ("Total Cash", v("totalCash"), "money"),
+        ("Net Debt", v("totalDebt") - v("totalCash"), "money"),
+        ("Operating Cash Flow", v("operatingCashflow"), "money"),
+        ("Free Cash Flow", v("freeCashflow"), "money")
+    ])
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # Independently Calculated Ratios
+    # --------------------------------------------------------
+
+    st.markdown("### Advanced Calculated Metrics")
 
     same_currency = (
-        currency == financial_currency
-        and currency != "Unknown"
+        info.get("currency") is not None and
+        info.get("currency") == info.get("financialCurrency")
     )
 
-    fcf_yield = np.nan
+    fcf_yield = (
+        divide(v("freeCashflow"), v("marketCap")) * 100
+        if same_currency else np.nan
+    )
 
-    price_fcf = np.nan
-
-    if same_currency and market_cap > 0:
-
-        fcf_yield = (
-            free_cash_flow / market_cap
-        ) * 100
-
-        if free_cash_flow > 0:
-
-            price_fcf = (
-                market_cap / free_cash_flow
-            )
+    price_fcf = (
+        divide(v("marketCap"), v("freeCashflow"))
+        if same_currency else np.nan
+    )
 
     metric_grid([
-        (
-            "Free Cash Flow Yield",
-            fcf_yield,
-            "percent"
-        ),
-        (
-            "Price / Free Cash Flow",
-            price_fcf,
-            "multiple"
-        )
+        ("ROIC - Annual", latest.get("ROIC (%)"), "percent"),
+        ("FCF Yield", fcf_yield, "percent"),
+        ("Price / FCF", price_fcf, "multiple"),
+        ("Interest Coverage - Annual", latest.get("Interest Coverage"), "multiple"),
+        ("Debt / EBITDA - Annual", latest.get("Debt / EBITDA"), "multiple"),
+        ("FCF Margin - Annual", latest.get("FCF Margin (%)"), "percent")
     ])
+
+    st.divider()
+
+    st.markdown("### Three-Year Historical Ratios")
+
+    ratios = [
+        "ROIC (%)",
+        "ROE (%)",
+        "ROA (%)",
+        "Gross Margin (%)",
+        "Operating Margin (%)",
+        "Net Margin (%)",
+        "EBITDA Margin (%)",
+        "FCF Margin (%)",
+        "Debt / Equity",
+        "Current Ratio",
+        "Quick Ratio",
+        "Debt / EBITDA",
+        "Interest Coverage"
+    ]
+
+    financial_table(recent, ratios)
 
     st.caption(
-        "Valuation ratios use the latest available Yahoo "
-        "Finance quote metrics. Forward P/E and PEG depend "
-        "on analyst estimates."
-    )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # Profitability and Capital Efficiency
-    # --------------------------------------------------------
-
-    st.markdown("### Profitability & Capital Efficiency")
-
-    metric_grid([
-        (
-            "Return on Invested Capital (ROIC)",
-            latest.get("ROIC (%)"),
-            "percent"
-        ),
-        (
-            "Return on Equity (ROE)",
-            latest.get("ROE (%)"),
-            "percent"
-        ),
-        (
-            "Return on Assets (ROA)",
-            latest.get("ROA (%)"),
-            "percent"
-        ),
-        (
-            "Gross Margin",
-            latest.get("Gross Margin (%)"),
-            "percent"
-        ),
-        (
-            "Operating Margin",
-            latest.get("Operating Margin (%)"),
-            "percent"
-        ),
-        (
-            "Net Profit Margin",
-            latest.get("Net Margin (%)"),
-            "percent"
-        ),
-        (
-            "EBITDA Margin",
-            latest.get("EBITDA Margin (%)"),
-            "percent"
-        ),
-        (
-            "Free Cash Flow Margin",
-            latest.get("FCF Margin (%)"),
-            "percent"
-        )
-    ])
-
-    st.caption(
-        "Profitability ratios are calculated from the "
-        "latest completed fiscal year."
-    )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # Financial Health and Liquidity
-    # --------------------------------------------------------
-
-    st.markdown("### Financial Health & Liquidity")
-
-    # Yahoo expresses debt-to-equity in percentage points.
-    # 100 is equivalent to a debt-to-equity ratio of 1.0.
-
-    debt_equity = get_value(
-        "debtToEquity",
-        0.01
-    )
-
-    metric_grid([
-        (
-            "Debt / Equity",
-            debt_equity,
-            "multiple"
-        ),
-        (
-            "Current Ratio",
-            get_value("currentRatio"),
-            "multiple"
-        ),
-        (
-            "Quick Ratio",
-            get_value("quickRatio"),
-            "multiple"
-        ),
-        (
-            "Total Debt",
-            get_value("totalDebt"),
-            "money"
-        ),
-        (
-            "Total Cash",
-            get_value("totalCash"),
-            "money"
-        ),
-        (
-            "Net Debt",
-            get_value("totalDebt") - get_value("totalCash"),
-            "money"
-        ),
-        (
-            "Debt / EBITDA (Annual)",
-            latest.get("Debt / EBITDA"),
-            "multiple"
-        ),
-        (
-            "Interest Coverage (Annual)",
-            latest.get("Interest Coverage"),
-            "multiple"
-        )
-    ])
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # Growth Metrics
-    # --------------------------------------------------------
-
-    st.markdown("### Growth Metrics")
-
-    metric_grid([
-        (
-            "Annual Revenue Growth",
-            latest.get("Revenue Growth (%)"),
-            "percent"
-        ),
-        (
-            "Annual Net Income Growth",
-            latest.get("Net Income Growth (%)"),
-            "percent"
-        ),
-        (
-            "Annual Operating Income Growth",
-            latest.get("Operating Income Growth (%)"),
-            "percent"
-        ),
-        (
-            "Annual EPS Growth",
-            latest.get("Diluted EPS Growth (%)"),
-            "percent"
-        ),
-        (
-            "Annual Free Cash Flow Growth",
-            latest.get("Free Cash Flow Growth (%)"),
-            "percent"
-        ),
-        (
-            "Latest Reported Revenue Growth",
-            get_value("revenueGrowth", 100),
-            "percent"
-        ),
-        (
-            "Latest Quarterly Earnings Growth",
-            get_value("earningsQuarterlyGrowth", 100),
-            "percent"
-        )
-    ])
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # Historical Profitability and Financial Ratios
-    # --------------------------------------------------------
-
-    st.markdown(
-        "### Three-Year Historical Financial Ratios"
+        "Source: independently calculated annual financial ratios. "
+        "ROE, ROA and ROIC use average annual balance sheet values."
     )
 
     if not recent.empty:
-
-        historical_fields = [
-            "ROIC (%)",
-            "ROE (%)",
-            "ROA (%)",
-            "Gross Margin (%)",
-            "Operating Margin (%)",
-            "Net Margin (%)",
-            "EBITDA Margin (%)",
-            "FCF Margin (%)",
-            "Debt / Equity",
-            "Debt / EBITDA",
-            "Current Ratio",
-            "Interest Coverage"
-        ]
-
-        financial_table(
-            recent,
-            historical_fields
-        )
 
         c1, c2 = st.columns(2)
 
         with c1:
 
             plot_chart(
-                recent[[
-                    "ROIC (%)",
-                    "ROE (%)",
-                    "ROA (%)"
-                ]],
-                "Returns on Capital",
-                ylabel="Percent",
-                chart_type="Bar",
-                labels=True
+                recent[["ROIC (%)", "ROE (%)", "ROA (%)"]],
+                "Capital Efficiency",
+                "Percent",
+                "Bar",
+                True
             )
 
         with c2:
@@ -3039,190 +2247,1708 @@ def render_company_overview():
                     "Operating Margin (%)",
                     "Net Margin (%)"
                 ]],
-                "Profit Margin Trends",
-                ylabel="Percent",
-                chart_type="Bar",
-                labels=True
+                "Profitability Trends",
+                "Percent",
+                "Bar",
+                True
             )
+
+    st.markdown("### Balance Sheet Summary")
+
+    financial_table(
+        recent,
+        [
+            "Total Assets",
+            "Equity",
+            "Total Debt",
+            "Cash",
+            "Current Assets",
+            "Current Liabilities"
+        ]
+    )
+
+    with st.expander("Financial Ratio Definitions"):
+
+        st.markdown("""
+- **P/E:** Price divided by earnings per share.
+- **P/S:** Market capitalization divided by revenue.
+- **PEG:** P/E relative to expected earnings growth.
+- **EV/EBITDA:** Enterprise value divided by EBITDA.
+- **ROE:** Net income divided by average equity.
+- **ROA:** Net income divided by average assets.
+- **ROIC:** After-tax operating income divided by average invested capital.
+- **Debt/Equity:** Total debt divided by shareholder equity.
+- **FCF Yield:** Free cash flow divided by market capitalization.
+- **Interest Coverage:** Operating income divided by interest expense.
+
+Current ratios are retrieved from Yahoo Finance.
+Historical ratios are independently calculated.
+Annual and trailing reporting periods may differ.
+        """)
+
+    if not recent.empty:
+
+        download_csv(
+            recent,
+            f"{ticker}_company_overview.csv",
+            "company_csv"
+        )
+
+
+# ============================================================
+# DCF VALUATION ENGINE
+# ============================================================
+
+def calculate_dcf(
+    revenue,
+    forecast,
+    wacc,
+    terminal_growth,
+    exit_multiple,
+    method,
+    cash,
+    debt,
+    shares,
+    other_adjustments=0
+):
+
+    if revenue <= 0 or shares <= 0 or wacc <= 0:
+        raise ValueError("Revenue, shares and WACC must be positive.")
+
+    if forecast.empty:
+        raise ValueError("Forecast cannot be empty.")
+
+    if method == "Perpetual Growth":
+
+        if terminal_growth >= wacc:
+            raise ValueError(
+                "WACC must exceed terminal growth."
+            )
+
+        if terminal_growth <= -1:
+            raise ValueError("Invalid terminal growth.")
+
+    if method == "Exit Multiple" and exit_multiple <= 0:
+        raise ValueError("Exit multiple must be positive.")
+
+    rows = []
+
+    current_revenue = revenue
+
+    for i, row in forecast.reset_index(drop=True).iterrows():
+
+        year = i + 1
+
+        growth = float(row["Revenue Growth %"]) / 100
+
+        margin = float(row["EBIT Margin %"]) / 100
+
+        tax = float(row["Tax Rate %"]) / 100
+
+        da_rate = float(row["D&A % Revenue"]) / 100
+
+        capex_rate = float(row["CAPEX % Revenue"]) / 100
+
+        nwc_rate = float(row["NWC Investment % Revenue"]) / 100
+
+        inputs = [
+            growth, margin, tax,
+            da_rate, capex_rate, nwc_rate
+        ]
+
+        if not np.isfinite(inputs).all():
+            raise ValueError("All forecast inputs must be valid numbers.")
+
+        if growth <= -1:
+            raise ValueError("Revenue growth must exceed -100%.")
+
+        if not 0 <= tax <= 1:
+            raise ValueError("Tax rate must be between 0% and 100%.")
+
+        if da_rate < 0 or capex_rate < 0:
+            raise ValueError("D&A and CAPEX cannot be negative.")
+
+        current_revenue *= 1 + growth
+
+        ebit = current_revenue * margin
+
+        # Do not automatically assume tax benefits
+        # when operating income is negative.
+
+        cash_taxes = max(ebit, 0) * tax
+
+        nopat = ebit - cash_taxes
+
+        da = current_revenue * da_rate
+
+        capex = current_revenue * capex_rate
+
+        change_nwc = current_revenue * nwc_rate
+
+        ebitda = ebit + da
+
+        fcff = nopat + da - capex - change_nwc
+
+        discount_factor = 1 / (1 + wacc) ** year
+
+        present_value = fcff * discount_factor
+
+        rows.append({
+            "Year": year,
+            "Revenue": current_revenue,
+            "EBIT": ebit,
+            "Cash Taxes": cash_taxes,
+            "NOPAT": nopat,
+            "D&A": da,
+            "EBITDA": ebitda,
+            "CAPEX": capex,
+            "NWC Investment": change_nwc,
+            "FCFF": fcff,
+            "Discount Factor": discount_factor,
+            "PV of FCFF": present_value
+        })
+
+    projection = pd.DataFrame(rows).set_index("Year")
+
+    last = projection.iloc[-1]
+
+    if method == "Perpetual Growth":
+
+        terminal_fcff = last["FCFF"] * (1 + terminal_growth)
+
+        if terminal_fcff <= 0:
+            raise ValueError(
+                "Perpetual growth requires positive terminal cash flow."
+            )
+
+        terminal_value = (
+            terminal_fcff /
+            (wacc - terminal_growth)
+        )
+
+    else:
+
+        if last["EBITDA"] <= 0:
+            raise ValueError(
+                "Exit multiple method requires positive terminal EBITDA."
+            )
+
+        terminal_value = (
+            last["EBITDA"] * exit_multiple
+        )
+
+    pv_terminal = (
+        terminal_value /
+        (1 + wacc) ** len(projection)
+    )
+
+    pv_cash_flows = projection["PV of FCFF"].sum()
+
+    enterprise_value = pv_cash_flows + pv_terminal
+
+    equity_value = (
+        enterprise_value +
+        cash -
+        debt +
+        other_adjustments
+    )
+
+    intrinsic_value = equity_value / shares
+
+    return {
+        "Projection": projection,
+        "PV Cash Flows": pv_cash_flows,
+        "Terminal Value": terminal_value,
+        "PV Terminal Value": pv_terminal,
+        "Enterprise Value": enterprise_value,
+        "Equity Value": equity_value,
+        "Intrinsic Value": intrinsic_value,
+        "Terminal Contribution": (
+            pv_terminal / enterprise_value * 100
+            if enterprise_value > 0 else np.nan
+        )
+    }
+
+
+# ============================================================
+# PAGE 6: DCF VALUATION
+# ============================================================
+
+def render_dcf():
+
+    st.subheader("💰 Discounted Cash Flow Valuation")
+
+    st.info(
+        "Enter a stock symbol. Yahoo Finance supplies available "
+        "historical financial data. All valuation assumptions "
+        "can be edited."
+    )
+
+    with st.form("dcf_load_form"):
+
+        symbol = st.text_input(
+            "Stock Symbol",
+            "AAPL",
+            key="dcf_symbol_input"
+        ).upper().strip()
+
+        reporting_period = st.radio(
+            "Base Financial Period",
+            ["TTM", "Annual"],
+            horizontal=True
+        )
+
+        load = st.form_submit_button(
+            "Load Company Financials",
+            type="primary"
+        )
+
+    if load or "dcf_selection" not in st.session_state:
+
+        st.session_state["dcf_selection"] = (
+            symbol,
+            reporting_period
+        )
+
+        st.session_state["dcf_version"] = (
+            st.session_state.get("dcf_version", 0) + 1
+        )
+
+    ticker, period = st.session_state["dcf_selection"]
+
+    version = st.session_state["dcf_version"]
+
+    prefix = f"dcf_{version}"
+
+    if not ticker:
+
+        st.warning("Enter a stock symbol.")
+        return
+
+    with st.spinner("Loading Financial Statements..."):
+
+        info = fetch_info(ticker)
+
+        annual = financial_history(
+            fetch_statements(ticker, "Annual")
+        )
+
+        quarterly = financial_history(
+            fetch_statements(ticker, "Quarterly"),
+            annual=False
+        )
+
+    if period == "TTM":
+
+        base = trailing_financials(quarterly)
+
+        base_date = (
+            quarterly.index[-1]
+            if not base.empty else None
+        )
+
+        if base.empty:
+
+            st.warning(
+                "TTM data unavailable. Select Annual or "
+                "enter the financial inputs manually."
+            )
+
+    else:
+
+        base = (
+            annual.iloc[-1]
+            if not annual.empty
+            else pd.Series(dtype=float)
+        )
+
+        base_date = (
+            annual.index[-1]
+            if not annual.empty else None
+        )
+
+    st.markdown(
+        f"## {info.get('longName', ticker)} ({ticker})"
+    )
+
+    currency = info.get("financialCurrency") or "USD"
+
+    quote_currency = info.get("currency")
+
+    st.caption(
+        f"Selected period: {period} | "
+        f"Financial currency: {currency} | "
+        f"Quote currency: {quote_currency or 'Unknown'}"
+    )
+
+    if base_date is not None:
+
+        st.caption(
+            f"Financial period ending: {base_date.date()}"
+        )
+
+    if info.get("sector") == "Financial Services":
+
+        st.warning(
+            "FCFF valuation is generally less suitable for banks "
+            "and insurers. An equity cash flow or excess return "
+            "model may be more appropriate."
+        )
+
+    st.caption(
+        "Financial amounts and share counts are expressed in "
+        "billions. Share price and intrinsic value are per share."
+    )
+
+    def edit(
+        label,
+        value,
+        name,
+        step=0.1,
+        minimum=None,
+        maximum=None,
+        help_text=None
+    ):
+
+        value = number(value)
+
+        kwargs = {}
+
+        if minimum is not None:
+
+            kwargs["min_value"] = float(minimum)
+
+            if pd.notna(value) and value < minimum:
+                value = np.nan
+
+        if maximum is not None:
+
+            kwargs["max_value"] = float(maximum)
+
+            if pd.notna(value) and value > maximum:
+                value = np.nan
+
+        return st.number_input(
+            label,
+            value=float(value) if pd.notna(value) else None,
+            step=float(step),
+            format="%.6f",
+            key=f"{prefix}_{name}",
+            help=help_text,
+            **kwargs
+        )
+
+    def annual_latest(field):
+
+        if annual.empty:
+            return np.nan
+
+        return number(annual.iloc[-1].get(field))
+
+    # --------------------------------------------------------
+    # SECTION 1: BASE FINANCIAL INPUTS
+    # --------------------------------------------------------
+
+    st.markdown("### 1. Base Financial Inputs")
+
+    st.caption(
+        "Defaults are retrieved from the selected financial "
+        "statement period. Blank values require manual entry."
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        revenue = edit(
+            "Base Revenue (Billions)",
+            number(base.get("Revenue")) / 1e9,
+            "revenue",
+            minimum=0.0
+        )
+
+        ebit = edit(
+            "Operating Income / EBIT (Billions)",
+            number(base.get("Operating Income")) / 1e9,
+            "ebit"
+        )
+
+        pretax = edit(
+            "Pretax Income (Billions)",
+            number(base.get("Pretax Income")) / 1e9,
+            "pretax"
+        )
+
+    with c2:
+
+        da = edit(
+            "Depreciation & Amortization (Billions)",
+            number(base.get("Depreciation & Amortization")) / 1e9,
+            "da",
+            minimum=0
+        )
+
+        capex = edit(
+            "Capital Expenditures (Billions)",
+            number(base.get("CAPEX")) / 1e9,
+            "capex",
+            minimum=0
+        )
+
+        nwc = edit(
+            "Working Capital Investment (Billions)",
+            number(base.get("Working Capital Investment")) / 1e9,
+            "nwc",
+            help_text=(
+                "Positive means investment in working capital "
+                "and reduces free cash flow. Negative means "
+                "working capital is released."
+            )
+        )
+
+    with c3:
+
+        tax_expense = edit(
+            "Tax Expense (Billions)",
+            number(base.get("Tax Provision")) / 1e9,
+            "tax_expense"
+        )
+
+        historical_growth = edit(
+            "Historical Annual Revenue Growth (%)",
+            annual_latest("Revenue Growth (%)"),
+            "historical_growth"
+        )
+
+        interest_expense = edit(
+            "Interest Expense (Billions)",
+            abs(number(base.get("Interest Expense"))) / 1e9,
+            "interest_expense",
+            minimum=0
+        )
 
     st.divider()
 
     # --------------------------------------------------------
-    # Cash Flow Summary
+    # SECTION 2: CAPITAL STRUCTURE
     # --------------------------------------------------------
 
-    st.markdown("### Cash Flow Summary")
+    st.markdown("### 2. Capital Structure & Market Data")
+
+    price_default = number(
+        info.get("currentPrice"),
+        number(info.get("regularMarketPrice"))
+    )
+
+    market_cap_default = number(
+        info.get("marketCap")
+    ) / 1e9
+
+    cash_default = number(info.get("totalCash")) / 1e9
+
+    debt_default = number(info.get("totalDebt")) / 1e9
+
+    if pd.isna(cash_default):
+
+        cash_default = number(base.get("Cash")) / 1e9
+
+    if pd.isna(debt_default):
+
+        debt_default = number(base.get("Total Debt")) / 1e9
+
+    if quote_currency != currency:
+
+        st.warning(
+            "Quote and financial currencies differ or are unknown. "
+            "Enter share price and market capitalization in the "
+            "financial statement currency. Verify ADR share counts "
+            "and currency conversion before valuing the company."
+        )
+
+        price_default = np.nan
+
+        market_cap_default = np.nan
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        share_price = edit(
+            "Current Share Price",
+            price_default,
+            "price",
+            minimum=0
+        )
+
+        market_cap = edit(
+            "Market Capitalization (Billions)",
+            market_cap_default,
+            "market_cap",
+            minimum=0
+        )
+
+        shares = edit(
+            "Shares Outstanding (Billions)",
+            number(info.get("sharesOutstanding")) / 1e9,
+            "shares",
+            step=0.001,
+            minimum=0
+        )
+
+    with c2:
+
+        total_cash = edit(
+            "Cash & Cash Equivalents (Billions)",
+            cash_default,
+            "cash",
+            minimum=0,
+            help_text="Use excess cash when estimating operating enterprise value."
+        )
+
+        total_debt = edit(
+            "Total Debt (Billions)",
+            debt_default,
+            "debt",
+            minimum=0
+        )
+
+        beta = edit(
+            "Beta",
+            number(info.get("beta")),
+            "beta"
+        )
+
+    with c3:
+
+        minority = edit(
+            "Minority Interest (Billions)",
+            number(base.get("Minority Interest")),
+            "minority_raw",
+            minimum=0
+        ) if False else edit(
+            "Minority Interest (Billions)",
+            number(base.get("Minority Interest"), 0) / 1e9,
+            "minority",
+            minimum=0,
+            help_text="Defaults to zero if unavailable. Verify manually."
+        )
+
+        preferred = edit(
+            "Preferred Stock (Billions)",
+            number(base.get("Preferred Stock"), 0) / 1e9,
+            "preferred",
+            minimum=0,
+            help_text="Defaults to zero if unavailable. Verify manually."
+        )
+
+        other_assets = edit(
+            "Other Nonoperating Adjustments (Billions)",
+            0.0,
+            "other_assets",
+            help_text=(
+                "Positive for additional assets, negative for "
+                "additional nonoperating liabilities."
+            )
+        )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 3: WACC
+    # --------------------------------------------------------
+
+    st.markdown("### 3. Weighted Average Cost of Capital")
+
+    st.caption(
+        "Risk-free rate and equity risk premium defaults are "
+        "illustrative assumptions, not live market estimates."
+    )
+
+    observed_tax = divide(tax_expense, pretax) * 100
+
+    if not np.isfinite(observed_tax) or not 0 <= observed_tax <= 100:
+        observed_tax = 21.0
+
+    estimated_debt_cost = (
+        divide(interest_expense, total_debt) * 100
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        risk_free = edit(
+            "Risk-Free Rate (%)",
+            4.0,
+            "risk_free"
+        )
+
+        equity_premium = edit(
+            "Equity Risk Premium (%)",
+            5.0,
+            "erp"
+        )
+
+    with c2:
+
+        cost_debt = edit(
+            "Pretax Cost of Debt (%)",
+            estimated_debt_cost,
+            "cost_debt",
+            minimum=0,
+            help_text=(
+                "Estimated using interest expense divided "
+                "by total debt. Replace with marginal borrowing cost."
+            )
+        )
+
+        tax_rate = edit(
+            "Marginal Tax Rate (%)",
+            observed_tax,
+            "tax_rate",
+            minimum=0,
+            maximum=100,
+            help_text=(
+                "Uses the observed effective tax rate if valid, "
+                "otherwise an illustrative 21%."
+            )
+        )
+
+    with c3:
+
+        wacc_method = st.radio(
+            "Discount Rate Method",
+            ["Calculated WACC", "Manual WACC"],
+            key=f"{prefix}_wacc_method"
+        )
+
+        manual_wacc = edit(
+            "Manual WACC (%)",
+            9.0,
+            "manual_wacc",
+            minimum=0.01
+        )
+
+    cost_equity = np.nan
+
+    calculated_wacc = np.nan
+
+    equity_weight = np.nan
+
+    debt_weight = np.nan
+
+    capm_inputs = [risk_free, beta, equity_premium]
+
+    if all(x is not None for x in capm_inputs):
+
+        cost_equity = (
+            risk_free + beta * equity_premium
+        )
+
+    if (
+        market_cap is not None and
+        total_debt is not None and
+        market_cap + total_debt > 0
+    ):
+
+        equity_weight = market_cap / (market_cap + total_debt)
+
+        debt_weight = total_debt / (market_cap + total_debt)
+
+        if np.isfinite(cost_equity) and tax_rate is not None:
+
+            if total_debt == 0:
+
+                calculated_wacc = cost_equity
+
+            elif cost_debt is not None:
+
+                calculated_wacc = (
+                    equity_weight * cost_equity +
+                    debt_weight * cost_debt *
+                    (1 - tax_rate / 100)
+                )
+
+    wacc_percent = (
+        calculated_wacc
+        if wacc_method == "Calculated WACC"
+        else number(manual_wacc)
+    )
 
     metric_grid([
-        (
-            "Operating Cash Flow",
-            latest.get("Operating Cash Flow"),
-            "money"
-        ),
-        (
-            "Capital Expenditures",
-            latest.get("CAPEX"),
-            "money"
-        ),
-        (
-            "Free Cash Flow",
-            latest.get("Free Cash Flow"),
-            "money"
-        ),
-        (
-            "Free Cash Flow Margin",
-            latest.get("FCF Margin (%)"),
-            "percent"
-        )
+        ("Cost of Equity", cost_equity, "percent"),
+        ("Equity Weight", equity_weight * 100, "percent"),
+        ("Debt Weight", debt_weight * 100, "percent"),
+        ("Selected WACC", wacc_percent, "percent")
     ])
 
     st.divider()
 
     # --------------------------------------------------------
-    # Balance Sheet Summary
+    # SECTION 4: FORECAST ASSUMPTIONS
     # --------------------------------------------------------
 
-    st.markdown("### Balance Sheet Summary")
+    st.markdown("### 4. Operating Forecast Assumptions")
 
-    if not recent.empty:
+    st.caption(
+        "Historical ratios are starting points, not forecasts. "
+        "Review and edit every assumption."
+    )
 
-        financial_table(
-            recent,
-            [
-                "Total Assets",
-                "Equity",
-                "Total Debt",
-                "Cash",
-                "Current Assets",
-                "Current Liabilities"
-            ]
+    years = st.slider(
+        "Projection Period (Years)",
+        3, 10, 5,
+        key=f"{prefix}_years"
+    )
+
+    margin_default = divide(ebit, revenue) * 100
+
+    da_default = divide(da, revenue) * 100
+
+    capex_default = divide(capex, revenue) * 100
+
+    nwc_default = divide(nwc, revenue) * 100
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        growth = edit(
+            "Projected Annual Revenue Growth (%)",
+            historical_growth,
+            "growth"
+        )
+
+        margin = edit(
+            "Projected EBIT Margin (%)",
+            margin_default,
+            "margin"
+        )
+
+    with c2:
+
+        forecast_tax = edit(
+            "Projected Tax Rate (%)",
+            tax_rate,
+            "forecast_tax",
+            minimum=0,
+            maximum=100
+        )
+
+        forecast_da = edit(
+            "D&A as % of Revenue",
+            da_default,
+            "forecast_da",
+            minimum=0
+        )
+
+    with c3:
+
+        forecast_capex = edit(
+            "CAPEX as % of Revenue",
+            capex_default,
+            "forecast_capex",
+            minimum=0
+        )
+
+        forecast_nwc = edit(
+            "NWC Investment as % of Revenue",
+            nwc_default,
+            "forecast_nwc"
+        )
+
+    assumption_values = [
+        growth,
+        margin,
+        forecast_tax,
+        forecast_da,
+        forecast_capex,
+        forecast_nwc
+    ]
+
+    if any(x is None for x in assumption_values):
+
+        st.warning(
+            "Complete all operating forecast assumptions."
+        )
+
+        return
+
+    forecast_defaults = pd.DataFrame({
+        "Year": list(range(1, years + 1)),
+        "Revenue Growth %": [growth] * years,
+        "EBIT Margin %": [margin] * years,
+        "Tax Rate %": [forecast_tax] * years,
+        "D&A % Revenue": [forecast_da] * years,
+        "CAPEX % Revenue": [forecast_capex] * years,
+        "NWC Investment % Revenue": [forecast_nwc] * years
+    })
+
+    st.markdown("#### Editable Year-by-Year Forecast")
+
+    st.caption(
+        "Edit individual table cells to model different growth "
+        "rates, margins and reinvestment assumptions each year."
+    )
+
+    forecast_signature = (
+        years,
+        tuple(assumption_values)
+    )
+
+    signature_key = f"{prefix}_forecast_signature"
+
+    revision_key = f"{prefix}_forecast_revision"
+
+    if st.session_state.get(signature_key) != forecast_signature:
+
+        st.session_state[signature_key] = forecast_signature
+
+        st.session_state[revision_key] = (
+            st.session_state.get(revision_key, 0) + 1
+        )
+
+    if st.button(
+        "Reset Annual Forecast to Default Assumptions",
+        key=f"{prefix}_reset_forecast"
+    ):
+
+        st.session_state[revision_key] += 1
+
+    revision = st.session_state[revision_key]
+
+    forecast = st.data_editor(
+        forecast_defaults,
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Year"],
+        num_rows="fixed",
+        key=f"{prefix}_forecast_{revision}"
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 5: TERMINAL VALUE
+    # --------------------------------------------------------
+
+    st.markdown("### 5. Terminal Value Assumptions")
+
+    method = st.radio(
+        "Terminal Valuation Method",
+        ["Perpetual Growth", "Exit Multiple"],
+        horizontal=True,
+        key=f"{prefix}_terminal_method"
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        terminal_growth = edit(
+            "Terminal Growth Rate (%)",
+            2.5,
+            "terminal_growth"
+        )
+
+    with c2:
+
+        exit_multiple = edit(
+            "Terminal EV / EBITDA Multiple",
+            12.0,
+            "exit_multiple",
+            minimum=0.01
+        )
+
+    with c3:
+
+        margin_safety = edit(
+            "Margin of Safety (%)",
+            20.0,
+            "margin_safety",
+            minimum=0,
+            maximum=100
+        )
+
+    st.caption(
+        "Terminal assumptions are illustrative and editable. "
+        "Perpetual growth assumes the final-year operating "
+        "economics and reinvestment remain sustainable."
+    )
+
+    # --------------------------------------------------------
+    # VALIDATE INPUTS
+    # --------------------------------------------------------
+
+    required = {
+        "Revenue": revenue,
+        "Share Price": share_price,
+        "Shares Outstanding": shares,
+        "Cash": total_cash,
+        "Debt": total_debt,
+        "Minority Interest": minority,
+        "Preferred Stock": preferred,
+        "Other Adjustments": other_assets,
+        "WACC": wacc_percent,
+        "Terminal Growth": terminal_growth,
+        "Exit Multiple": exit_multiple,
+        "Margin of Safety": margin_safety
+    }
+
+    missing = [
+        name for name, value in required.items()
+        if value is None or not np.isfinite(number(value))
+    ]
+
+    if missing:
+
+        st.warning(
+            "Complete the following inputs: " +
+            ", ".join(missing)
+        )
+
+        return
+
+    if revenue <= 0 or shares <= 0 or share_price <= 0:
+
+        st.error(
+            "Revenue, share price and shares outstanding "
+            "must be positive."
+        )
+
+        return
+
+    if wacc_percent <= 0:
+
+        st.error("WACC must be greater than zero.")
+
+        return
+
+    other_adjustments = (
+        other_assets - minority - preferred
+    )
+
+    wacc = wacc_percent / 100
+
+    terminal_rate = terminal_growth / 100
+
+    try:
+
+        result = calculate_dcf(
+            revenue,
+            forecast,
+            wacc,
+            terminal_rate,
+            exit_multiple,
+            method,
+            total_cash,
+            total_debt,
+            shares,
+            other_adjustments
+        )
+
+    except (ValueError, TypeError) as error:
+
+        st.error(str(error))
+
+        return
+
+    intrinsic = result["Intrinsic Value"]
+
+    upside = (
+        intrinsic / share_price - 1
+    ) * 100
+
+    safety_price = (
+        intrinsic * (1 - margin_safety / 100)
+        if intrinsic > 0 else np.nan
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 6: DCF RESULTS
+    # --------------------------------------------------------
+
+    st.markdown("### 6. DCF Valuation Results")
+
+    a, b, c, d = st.columns(4)
+
+    a.metric(
+        "Current Share Price",
+        f"{currency} {share_price:,.2f}"
+    )
+
+    b.metric(
+        "Estimated Intrinsic Value",
+        f"{currency} {intrinsic:,.2f}"
+    )
+
+    c.metric(
+        "Implied Upside / Downside",
+        f"{upside:+.2f}%"
+    )
+
+    d.metric(
+        "Margin of Safety Price",
+        fmt(safety_price)
+    )
+
+    if intrinsic <= 0:
+
+        st.warning(
+            "The modeled equity value is nonpositive. "
+            "This is not a literal negative tradable share price."
+        )
+
+    elif intrinsic > share_price:
+
+        st.success(
+            "The estimated intrinsic value exceeds the "
+            "current share price under these assumptions."
+        )
+
+    else:
+
+        st.warning(
+            "The estimated intrinsic value is below the "
+            "current share price under these assumptions."
+        )
+
+    metric_grid([
+        (
+            "Enterprise Value (B)",
+            result["Enterprise Value"],
+            "number"
+        ),
+        (
+            "Equity Value (B)",
+            result["Equity Value"],
+            "number"
+        ),
+        (
+            "Terminal Value Contribution",
+            result["Terminal Contribution"],
+            "percent"
+        ),
+        (
+            "WACC",
+            wacc_percent,
+            "percent"
+        )
+    ])
+
+    if result["Terminal Contribution"] > 80:
+
+        st.warning(
+            "More than 80% of modeled enterprise value comes "
+            "from terminal value. Valuation is highly sensitive "
+            "to long-term assumptions."
         )
 
     # --------------------------------------------------------
-    # Ratio Definitions
+    # SECTION 7: PROJECTED FINANCIAL STATEMENTS
     # --------------------------------------------------------
 
-    with st.expander(
-        "Financial Ratio Definitions & Data Limitations"
-    ):
+    st.markdown("### 7. Projected Financial Statements")
+
+    projection = result["Projection"]
+
+    st.caption(
+        f"Financial amounts in billions of {currency}."
+    )
+
+    st.dataframe(
+        projection.T.style.format("{:,.3f}"),
+        use_container_width=True
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        plot_chart(
+            projection["Revenue"],
+            "Projected Revenue",
+            "Billions",
+            "Bar",
+            True
+        )
+
+        plot_chart(
+            projection[["EBIT", "EBITDA", "NOPAT"]],
+            "Projected Operating Profits",
+            "Billions",
+            "Bar",
+            True
+        )
+
+    with c2:
+
+        plot_chart(
+            projection[["FCFF", "PV of FCFF"]],
+            "Projected Free Cash Flow to the Firm",
+            "Billions",
+            "Bar",
+            True
+        )
+
+        plot_chart(
+            projection[["D&A", "CAPEX", "NWC Investment"]],
+            "Reinvestment Requirements",
+            "Billions",
+            "Bar",
+            True
+        )
+
+    # --------------------------------------------------------
+    # SECTION 8: VALUATION BRIDGE
+    # --------------------------------------------------------
+
+    st.markdown("### 8. Enterprise to Equity Value Bridge")
+
+    bridge = pd.DataFrame({
+        "Component": [
+            "PV of Projected Free Cash Flows",
+            "Undiscounted Terminal Value",
+            "PV of Terminal Value",
+            "Enterprise Value",
+            "Add Cash",
+            "Less Debt",
+            "Less Minority Interest",
+            "Less Preferred Stock",
+            "Other Nonoperating Adjustments",
+            "Equity Value",
+            "Shares Outstanding (Billions)",
+            "Intrinsic Value Per Share"
+        ],
+        "Value": [
+            result["PV Cash Flows"],
+            result["Terminal Value"],
+            result["PV Terminal Value"],
+            result["Enterprise Value"],
+            total_cash,
+            -total_debt,
+            -minority,
+            -preferred,
+            other_assets,
+            result["Equity Value"],
+            shares,
+            intrinsic
+        ]
+    })
+
+    st.dataframe(
+        bridge.style.format({"Value": "{:,.3f}"}),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+
+    values = [
+        share_price,
+        intrinsic,
+        safety_price
+    ]
+
+    bars = ax.bar(
+        ["Market Price", "Intrinsic Value", "Safety Price"],
+        values,
+        color=["gray", "steelblue", "seagreen"]
+    )
+
+    ax.bar_label(
+        bars,
+        fmt="%.2f",
+        padding=4
+    )
+
+    ax.set_ylabel(f"{currency} per Share")
+
+    ax.set_title("Market Price vs Estimated Intrinsic Value")
+
+    ax.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+
+    st.pyplot(fig)
+
+    plt.close(fig)
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 9: SENSITIVITY ANALYSIS
+    # --------------------------------------------------------
+
+    st.markdown("### 9. DCF Sensitivity Analysis")
+
+    st.caption(
+        "Intrinsic value per share under different WACC "
+        "and terminal valuation assumptions."
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        wacc_step = st.number_input(
+            "WACC Increment (Percentage Points)",
+            min_value=0.1,
+            value=1.0,
+            step=0.25,
+            key=f"{prefix}_wacc_step"
+        )
+
+    with c2:
+
+        terminal_step = st.number_input(
+            "Terminal Growth Increment (Percentage Points)"
+            if method == "Perpetual Growth"
+            else "Exit Multiple Increment",
+            min_value=0.1,
+            value=0.5 if method == "Perpetual Growth" else 2.0,
+            step=0.1,
+            key=f"{prefix}_terminal_step_{method}"
+        )
+
+    wacc_values = [
+        wacc_percent + i * wacc_step
+        for i in [-2, -1, 0, 1, 2]
+    ]
+
+    if method == "Perpetual Growth":
+
+        terminal_values = [
+            terminal_growth + i * terminal_step
+            for i in [-2, -1, 0, 1, 2]
+        ]
+
+        column_names = [
+            f"{x:.2f}%"
+            for x in terminal_values
+        ]
+
+    else:
+
+        terminal_values = [
+            exit_multiple + i * terminal_step
+            for i in [-2, -1, 0, 1, 2]
+        ]
+
+        column_names = [
+            f"{x:.2f}x"
+            for x in terminal_values
+        ]
+
+    sensitivity = pd.DataFrame(
+        index=[f"{x:.2f}%" for x in wacc_values],
+        columns=column_names,
+        dtype=float
+    )
+
+    sensitivity.index.name = "WACC"
+
+    for w in wacc_values:
+
+        for j, terminal in enumerate(terminal_values):
+
+            try:
+
+                test = calculate_dcf(
+                    revenue,
+                    forecast,
+                    w / 100,
+                    (
+                        terminal / 100
+                        if method == "Perpetual Growth"
+                        else terminal_rate
+                    ),
+                    (
+                        terminal
+                        if method == "Exit Multiple"
+                        else exit_multiple
+                    ),
+                    method,
+                    total_cash,
+                    total_debt,
+                    shares,
+                    other_adjustments
+                )
+
+                value = test["Intrinsic Value"]
+
+            except (ValueError, TypeError):
+
+                value = np.nan
+
+            sensitivity.loc[
+                f"{w:.2f}%",
+                column_names[j]
+            ] = value
+
+    def sensitivity_color(value):
+
+        if pd.isna(value):
+            return ""
+
+        if value >= share_price:
+
+            return (
+                "background-color: #d7edda; "
+                "color: #16451d"
+            )
+
+        return (
+            "background-color: #f3dada; "
+            "color: #701c1c"
+        )
+
+    styled = sensitivity.style.format(
+        "{:,.2f}",
+        na_rep="N/A"
+    )
+
+    styled = styled.map(sensitivity_color)
+
+    st.dataframe(
+        styled,
+        use_container_width=True
+    )
+
+    st.caption(
+        "Green indicates value at or above the current share price. "
+        "Red indicates value below the current share price. "
+        "Invalid valuation combinations display N/A."
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 10: SCENARIO ANALYSIS
+    # --------------------------------------------------------
+
+    st.markdown("### 10. Bear, Base & Bull Case Analysis")
+
+    st.caption(
+        "Adjustments are percentage-point changes applied "
+        "to each year of the base-case forecast."
+    )
+
+    scenarios = pd.DataFrame({
+        "Scenario": ["Bear Case", "Base Case", "Bull Case"],
+        "Revenue Growth Adjustment": [-3.0, 0.0, 3.0],
+        "EBIT Margin Adjustment": [-2.0, 0.0, 2.0],
+        "WACC Adjustment": [1.0, 0.0, -1.0],
+        "Terminal Growth Adjustment": [-0.5, 0.0, 0.5],
+        "Exit Multiple Adjustment": [-2.0, 0.0, 2.0]
+    })
+
+    scenarios = st.data_editor(
+        scenarios,
+        disabled=["Scenario"],
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed",
+        key=f"{prefix}_scenarios"
+    )
+
+    scenario_results = []
+
+    for _, row in scenarios.iterrows():
+
+        scenario_forecast = forecast.copy()
+
+        scenario_forecast["Revenue Growth %"] += (
+            row["Revenue Growth Adjustment"]
+        )
+
+        scenario_forecast["EBIT Margin %"] += (
+            row["EBIT Margin Adjustment"]
+        )
+
+        scenario_wacc = (
+            wacc_percent +
+            row["WACC Adjustment"]
+        ) / 100
+
+        scenario_terminal = (
+            terminal_growth +
+            row["Terminal Growth Adjustment"]
+        ) / 100
+
+        scenario_multiple = (
+            exit_multiple +
+            row["Exit Multiple Adjustment"]
+        )
+
+        try:
+
+            scenario = calculate_dcf(
+                revenue,
+                scenario_forecast,
+                scenario_wacc,
+                scenario_terminal,
+                scenario_multiple,
+                method,
+                total_cash,
+                total_debt,
+                shares,
+                other_adjustments
+            )
+
+            value = scenario["Intrinsic Value"]
+
+        except (ValueError, TypeError):
+
+            value = np.nan
+
+        scenario_results.append({
+            "Scenario": row["Scenario"],
+            "Intrinsic Value": value,
+            "Upside / Downside (%)": (
+                value / share_price - 1
+            ) * 100,
+            "Margin of Safety Price": (
+                value * (1 - margin_safety / 100)
+                if value > 0 else np.nan
+            )
+        })
+
+    scenario_results = pd.DataFrame(scenario_results)
+
+    st.dataframe(
+        scenario_results.style.format({
+            "Intrinsic Value": "{:,.2f}",
+            "Upside / Downside (%)": "{:+.2f}%",
+            "Margin of Safety Price": "{:,.2f}"
+        }, na_rep="N/A"),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    plot_chart(
+        scenario_results.set_index("Scenario")["Intrinsic Value"],
+        "Scenario Valuations",
+        f"{currency} per Share",
+        "Bar",
+        True
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # SECTION 11: MODEL DEFINITIONS
+    # --------------------------------------------------------
+
+    with st.expander("DCF Formulas & Model Assumptions"):
 
         st.markdown("""
-**Valuation**
+### Free Cash Flow to the Firm
 
-- **Trailing P/E:** Share price divided by trailing earnings per share.
-- **Forward P/E:** Share price divided by estimated future earnings per share.
-- **P/S:** Market capitalization divided by revenue.
-- **PEG:** P/E adjusted for expected earnings growth.
-- **P/B:** Market capitalization divided by book equity.
-- **EV/EBITDA:** Enterprise value divided by EBITDA.
-- **EV/Revenue:** Enterprise value divided by revenue.
-- **Earnings Yield:** Earnings divided by market price.
-- **Free Cash Flow Yield:** Free cash flow divided by market capitalization.
+FCFF = NOPAT + D&A - CAPEX - Change in NWC
 
-**Profitability**
+NOPAT = EBIT - Estimated Cash Taxes
 
-- **ROIC:** After-tax operating income divided by average invested capital.
-- **ROE:** Net income divided by average shareholder equity.
-- **ROA:** Net income divided by average total assets.
-- **Gross Margin:** Gross profit divided by revenue.
-- **Operating Margin:** Operating income divided by revenue.
-- **Net Margin:** Net income divided by revenue.
-- **FCF Margin:** Free cash flow divided by revenue.
+### Cost of Equity
 
-**Financial Health**
+Cost of Equity = Risk-Free Rate + Beta × Equity Risk Premium
 
-- **Debt/Equity:** Total debt divided by shareholder equity.
-- **Current Ratio:** Current assets divided by current liabilities.
-- **Quick Ratio:** Liquid current assets divided by current liabilities.
-- **Debt/EBITDA:** Total debt divided by annual EBITDA.
-- **Interest Coverage:** Operating income divided by interest expense.
-- **Net Debt:** Total debt minus cash.
+### Weighted Average Cost of Capital
 
-**ROIC Calculation**
+WACC = Equity Weight × Cost of Equity
++ Debt Weight × Cost of Debt × (1 - Tax Rate)
 
-ROIC = NOPAT / Average Invested Capital
+### Perpetual Growth Terminal Value
 
-NOPAT = Operating Income × (1 − Effective Tax Rate)
+Terminal Value = Final Year FCFF × (1 + Terminal Growth)
+÷ (WACC - Terminal Growth)
 
-Reported invested capital is preferred when available.
+### Exit Multiple Terminal Value
 
-Otherwise, invested capital is estimated as debt plus
-equity minus cash.
+Terminal Value = Final Year EBITDA × Exit Multiple
 
-**Data Limitations**
+### Enterprise Value
 
-- All financial data comes from Yahoo Finance through yfinance.
-- Missing financial data is displayed as N/A.
-- Annual and trailing financial metrics may have different
-  reporting dates.
-- Growth rates are not calculated when the prior-period value
-  is zero or negative.
-- Some ratios are unsuitable for banks, insurance companies,
-  ETFs and companies with negative earnings or negative equity.
-- ROIC requires adequate tax and invested capital information.
-- Quotes may be delayed.
+Enterprise Value = PV of Forecast Cash Flows
++ PV of Terminal Value
+
+### Equity Value
+
+Equity Value = Enterprise Value + Cash - Debt
+- Minority Interest - Preferred Stock
++ Other Nonoperating Adjustments
+
+### Intrinsic Value
+
+Intrinsic Value = Equity Value ÷ Shares Outstanding
+
+### Margin of Safety
+
+Margin of Safety Price =
+Intrinsic Value × (1 - Margin of Safety)
+
+### Model Limitations
+
+- Yahoo Finance data may be incomplete or delayed.
+- All forecast assumptions are editable estimates.
+- Historical revenue growth is not necessarily sustainable.
+- Working capital investment is forecast as a percentage of revenue.
+- Terminal growth must be lower than WACC.
+- Terminal reinvestment must support long-term growth.
+- Debt, cash and share counts may have different reporting dates.
+- Debt book value is used as a proxy for market value.
+- Current shares outstanding may not capture future dilution.
+- Minority interests and preferred stock default to zero
+  when unavailable and should be verified.
+- The model does not separately forecast tax loss carryforwards.
+- CAPEX and depreciation assumptions should reflect the
+  company's long-term capital requirements.
+- This model is generally unsuitable for valuing banks,
+  insurers and other financial institutions.
+- Intrinsic value is an estimate, not a guaranteed price target.
         """)
 
     # --------------------------------------------------------
-    # Download Company Financial Data
+    # SECTION 12: EXPORT DATA
     # --------------------------------------------------------
 
-    if not recent.empty:
+    st.markdown("### 11. Download DCF Analysis")
 
-        csv_button(
-            recent,
-            f"{ticker}_company_financial_summary.csv",
-            "company_summary_csv"
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        download_csv(
+            projection,
+            f"{ticker}_DCF_Projections.csv",
+            f"{prefix}_projection_csv"
+        )
+
+        download_csv(
+            sensitivity,
+            f"{ticker}_DCF_Sensitivity.csv",
+            f"{prefix}_sensitivity_csv"
+        )
+
+        download_csv(
+            forecast,
+            f"{ticker}_DCF_Assumptions.csv",
+            f"{prefix}_forecast_csv"
+        )
+
+    with c2:
+
+        download_csv(
+            bridge,
+            f"{ticker}_DCF_Valuation.csv",
+            f"{prefix}_bridge_csv"
+        )
+
+        download_csv(
+            scenario_results,
+            f"{ticker}_DCF_Scenarios.csv",
+            f"{prefix}_scenario_csv"
+        )
+
+        model_inputs = pd.DataFrame({
+            "Input": [
+                "Ticker",
+                "Reporting Period",
+                "Financial Currency",
+                "Revenue",
+                "Share Price",
+                "Market Capitalization",
+                "Shares Outstanding",
+                "Cash",
+                "Debt",
+                "Minority Interest",
+                "Preferred Stock",
+                "Other Adjustments",
+                "Beta",
+                "Risk-Free Rate (%)",
+                "Equity Risk Premium (%)",
+                "Cost of Debt (%)",
+                "Tax Rate (%)",
+                "WACC (%)",
+                "Terminal Growth (%)",
+                "Exit Multiple",
+                "Terminal Method",
+                "Margin of Safety (%)"
+            ],
+            "Value": [
+                ticker,
+                period,
+                currency,
+                revenue,
+                share_price,
+                market_cap,
+                shares,
+                total_cash,
+                total_debt,
+                minority,
+                preferred,
+                other_assets,
+                beta,
+                risk_free,
+                equity_premium,
+                cost_debt,
+                tax_rate,
+                wacc_percent,
+                terminal_growth,
+                exit_multiple,
+                method,
+                margin_safety
+            ]
+        })
+
+        download_csv(
+            model_inputs,
+            f"{ticker}_DCF_Model_Inputs.csv",
+            f"{prefix}_inputs_csv"
         )
 
 
 # ============================================================
-# PAGE 6: CHEAT SHEET
+# PAGE 7: CHEAT SHEET
 # ============================================================
 
 def render_cheat_sheet():
 
-    st.subheader("📋 Cheat Sheet")
-
-    st.info(
-        "Reference guide for all preset market ratios."
-    )
+    st.subheader("📋 Market Ratio Cheat Sheet")
 
     rows = []
 
     for category, ratios in RATIO_GROUPS.items():
 
-        for label, symbols in ratios.items():
+        for name, symbols in ratios.items():
 
-            symbol_a, symbol_b = symbols
+            a, b = symbols
 
-            ratio = f"{symbol_a}/{symbol_b}"
-
-            description, commentary = RATIO_INFO.get(
-                ratio,
-                ("", "")
-            )
+            ratio = f"{a}/{b}"
 
             rows.append({
                 "Category": category,
                 "Ratio": ratio,
-                "Symbol 1": symbol_a,
-                "Symbol 2": symbol_b,
-                "Description": description,
-                "Interpretation": commentary
+                "Description": name,
+                "Interpretation": RATIO_INFO.get(
+                    ratio,
+                    "Rising indicates numerator outperformance."
+                )
             })
 
-    cheat_sheet = pd.DataFrame(rows)
+    table = pd.DataFrame(rows)
 
     st.dataframe(
-        cheat_sheet,
+        table,
         use_container_width=True,
         hide_index=True
     )
 
-    csv_button(
-        cheat_sheet,
-        "ratio_cheat_sheet.csv",
+    download_csv(
+        table,
+        "market_ratio_cheat_sheet.csv",
         "cheat_sheet_csv"
     )
 
@@ -3234,9 +3960,8 @@ def render_cheat_sheet():
 st.title("📊 Charts to Watch")
 
 st.caption(
-    "Market Ratios | Performance Comparisons | "
-    "Financial Statements | Technical Indicators | "
-    "Company Financial Analysis"
+    "Market Ratios | Performance | Fundamentals | "
+    "Technicals | Company Research | DCF Valuation"
 )
 
 
@@ -3254,6 +3979,7 @@ page = st.sidebar.radio(
         "📑 Fundamentals",
         "🧭 Technicals",
         "🏢 Company Overview",
+        "💰 DCF Valuation",
         "📋 Cheat Sheet"
     ],
     index=0
@@ -3261,18 +3987,28 @@ page = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
+if st.sidebar.button("Refresh Yahoo Finance Data"):
+
+    st.cache_data.clear()
+
+    st.rerun()
+
 st.sidebar.caption(
-    "Market and financial data provided by Yahoo Finance."
+    "Financial and market data provided by Yahoo Finance."
+)
+
+st.sidebar.caption(
+    "For investment research and educational purposes."
 )
 
 
 # ============================================================
-# APPLICATION PAGE ROUTING
+# APPLICATION ROUTING
 # ============================================================
 
 if page == "📊 Ratio Dashboard":
 
-    render_ratio_dashboard()
+    render_ratios()
 
 elif page == "📈 Performance":
 
@@ -3288,7 +4024,11 @@ elif page == "🧭 Technicals":
 
 elif page == "🏢 Company Overview":
 
-    render_company_overview()
+    render_company()
+
+elif page == "💰 DCF Valuation":
+
+    render_dcf()
 
 elif page == "📋 Cheat Sheet":
 
